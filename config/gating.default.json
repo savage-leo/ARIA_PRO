@@ -1,0 +1,35 @@
+{
+  "version": "2025-08-17T00:00:00Z",
+  "models": ["LSTM", "PPO", "XGB", "CNN"],
+  "default_thresholds": { "T": 0.60, "R": 0.58, "B": 0.62 },
+  "weights": {
+    "T": {
+      "Low":  { "LSTM": 1.0, "PPO": 0.8, "XGB": 0.4, "CNN": 0.2 },
+      "Med":  { "LSTM": 1.0, "PPO": 0.8, "XGB": 0.4, "CNN": 0.2 },
+      "High": { "LSTM": 0.5, "PPO": 0.5, "XGB": 0.4, "CNN": 0.2, "cap_position": true }
+    },
+    "R": {
+      "Low":  { "CNN": 0.9, "XGB": 0.7, "LSTM": 0.2, "PPO": 0.1 },
+      "Med":  { "CNN": 0.9, "XGB": 0.7, "LSTM": 0.2, "PPO": 0.1 },
+      "High": { "CNN": 0.0, "XGB": 0.0, "LSTM": 0.0, "PPO": 0.0 }
+    },
+    "B": {
+      "Low":  { "CNN": 0.0, "PPO": 0.0, "XGB": 0.0, "LSTM": 0.0 },
+      "Med":  { "CNN": 0.0, "PPO": 0.0, "XGB": 0.0, "LSTM": 0.0 },
+      "High": { "CNN": 0.8, "PPO": 0.7, "XGB": 0.3, "LSTM": 0.2 }
+    }
+  },
+  "feature_schema": {
+    "fusion_features_order": [
+      "p_LSTM", "p_PPO", "p_XGB", "p_CNN",
+      "vol_Low", "vol_Med", "vol_High",
+      "state_T", "state_R", "state_B",
+      "spread_z",
+      "sess_ASIA", "sess_EU", "sess_US"
+    ]
+  },
+  "exec_guards": {
+    "spread_max_pips_env": "ARIA_SPREAD_MAX_PIPS",
+    "news_guard_min_env": "ARIA_NEWS_GUARD_MINUTES"
+  }
+}

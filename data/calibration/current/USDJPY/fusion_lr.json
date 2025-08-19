@@ -1,0 +1,37 @@
+{
+  "type": "logreg",
+  "W": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "b": -2.0,
+  "features_order": [
+    "p_LSTM",
+    "p_PPO",
+    "p_XGB",
+    "p_CNN",
+    "vol_Low",
+    "vol_Med",
+    "vol_High",
+    "state_T",
+    "state_R",
+    "state_B",
+    "spread_z",
+    "sess_ASIA",
+    "sess_EU",
+    "sess_US"
+  ],
+  "version_hash": "400e0066723659533b3bb661eb5219caef1bb12c3daf541e9187aa0b850b09e9"
+}

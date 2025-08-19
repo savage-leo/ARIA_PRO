@@ -1,0 +1,61 @@
+[[redirects]]
+  from = "/api/*"
+  to = "https://4495571332f1.ngrok-free.app/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/ws"
+  to = "wss://4495571332f1.ngrok-free.app/ws"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/trading/*"
+  to = "https://4495571332f1.ngrok-free.app/trading/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/account/*"
+  to = "https://4495571332f1.ngrok-free.app/account/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/market/*"
+  to = "https://4495571332f1.ngrok-free.app/market/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/positions/*"
+  to = "https://4495571332f1.ngrok-free.app/positions/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/signals/*"
+  to = "https://4495571332f1.ngrok-free.app/signals/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/monitoring/*"
+  to = "https://4495571332f1.ngrok-free.app/monitoring/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+  VITE_BACKEND_BASE = "https://4495571332f1.ngrok-free.app"
+  VITE_BACKEND_WS = "wss://4495571332f1.ngrok-free.app/ws"

@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  aria-backend:
+    build: .
+    ports:
+      - "8100:8100"
+    env_file:
+      - production.env
+    volumes:
+      - ./logs:/app/logs
+      - ./backend/models:/app/backend/models
+    restart: unless-stopped
+    networks:
+      - aria-network
+
+networks:
+  aria-network:
+    driver: bridge

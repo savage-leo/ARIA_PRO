@@ -1,0 +1,72 @@
+{
+  "symbol": "EURUSD",
+  "models": [
+    "lstm",
+    "xgb",
+    "cnn"
+  ],
+  "deployed_files": [
+    "C:\\savage\\ARIA_PRO\\backend\\models\\lstm_eurusd.onnx",
+    "C:\\savage\\ARIA_PRO\\backend\\models\\cnn_calibrator_eurusd.pkl",
+    "C:\\savage\\ARIA_PRO\\backend\\models\\fusion_model_eurusd.pkl",
+    "C:\\savage\\ARIA_PRO\\backend\\models\\lstm_calibrator_eurusd.pkl",
+    "C:\\savage\\ARIA_PRO\\backend\\models\\xgb_calibrator_eurusd.pkl"
+  ],
+  "training_config": {
+    "data_prep": {
+      "start_date": "2019-01-01",
+      "end_date": "2024-01-01",
+      "horizon": 8,
+      "features": [
+        "r",
+        "abs_r",
+        "ewma_sig",
+        "atr14",
+        "rsi",
+        "bb_pos",
+        "mom5",
+        "mom10",
+        "mom20"
+      ]
+    },
+    "models": {
+      "lstm": {
+        "enabled": true,
+        "epochs": 20,
+        "batch_size": 64,
+        "learning_rate": 0.001,
+        "seq_len": 16,
+        "hidden_size": 32
+      },
+      "xgb": {
+        "enabled": true,
+        "n_estimators": 100,
+        "max_depth": 4,
+        "learning_rate": 0.05,
+        "subsample": 0.8
+      },
+      "cnn": {
+        "enabled": true,
+        "epochs": 15,
+        "batch_size": 64,
+        "learning_rate": 0.001,
+        "seq_len": 32,
+        "model_type": "dilated"
+      }
+    },
+    "walk_forward": {
+      "enabled": true,
+      "train_months": 4,
+      "test_months": 2
+    },
+    "calibration": {
+      "enabled": true,
+      "method": "isotonic"
+    },
+    "deployment": {
+      "copy_to_backend": true,
+      "generate_metadata": true
+    }
+  },
+  "deployment_time": "2025-08-18T08:33:23.370446"
+}

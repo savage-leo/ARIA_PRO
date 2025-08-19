@@ -1,0 +1,115 @@
+{
+  "symbol": "EURUSD",
+  "start_time": "2025-08-18T00:51:53.366170",
+  "config": {
+    "data_prep": {
+      "start_date": "2019-01-01",
+      "end_date": "2024-01-01",
+      "horizon": 8,
+      "features": [
+        "r",
+        "abs_r",
+        "ewma_sig",
+        "atr14",
+        "rsi",
+        "bb_pos",
+        "mom5",
+        "mom10",
+        "mom20"
+      ]
+    },
+    "models": {
+      "lstm": {
+        "enabled": true,
+        "epochs": 20,
+        "batch_size": 64,
+        "learning_rate": 0.001,
+        "seq_len": 16,
+        "hidden_size": 32
+      },
+      "xgb": {
+        "enabled": true,
+        "n_estimators": 100,
+        "max_depth": 4,
+        "learning_rate": 0.05,
+        "subsample": 0.8
+      },
+      "cnn": {
+        "enabled": true,
+        "epochs": 15,
+        "batch_size": 64,
+        "learning_rate": 0.001,
+        "seq_len": 32,
+        "model_type": "dilated"
+      }
+    },
+    "walk_forward": {
+      "enabled": true,
+      "train_months": 4,
+      "test_months": 2
+    },
+    "calibration": {
+      "enabled": true,
+      "method": "isotonic"
+    },
+    "deployment": {
+      "copy_to_backend": true,
+      "generate_metadata": true
+    }
+  },
+  "steps": {
+    "data_preparation": {
+      "command": "C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python311\\python.exe C:\\savage\\ARIA_PRO\\backend\\training\\prepare_m15_npz.py --symbol EURUSD --m1 C:\\savage\\ARIA_PRO\\data\\parquet\\EURUSD\\EURUSD_m1.parquet --horizon 8 --out C:\\savage\\ARIA_PRO\\data\\features_cache\\EURUSD\\train_m15.npz",
+      "return_code": 0,
+      "elapsed_time": 6.923522472381592,
+      "log_file": "C:\\savage\\ARIA_PRO\\data\\training_logs\\EURUSD\\data_preparation_20250818_005153.log"
+    },
+    "train_lstm": {
+      "command": "C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python311\\python.exe C:\\savage\\ARIA_PRO\\backend\\training\\train_lstm.py --symbol EURUSD --npz C:\\savage\\ARIA_PRO\\data\\features_cache\\EURUSD\\train_m15.npz --epochs 20 --batch 64 --lr 0.001",
+      "return_code": 1,
+      "elapsed_time": 32.411856174468994,
+      "log_file": "C:\\savage\\ARIA_PRO\\data\\training_logs\\EURUSD\\train_lstm_20250818_005200.log"
+    },
+    "train_xgb": {
+      "command": "C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python311\\python.exe C:\\savage\\ARIA_PRO\\backend\\training\\train_xgb.py --symbol EURUSD --npz C:\\savage\\ARIA_PRO\\data\\features_cache\\EURUSD\\train_m15.npz --n_estimators 100 --max_depth 4 --learning_rate 0.05",
+      "return_code": 2,
+      "elapsed_time": 13.1413733959198,
+      "log_file": "C:\\savage\\ARIA_PRO\\data\\training_logs\\EURUSD\\train_xgb_20250818_005232.log"
+    },
+    "train_cnn": {
+      "command": "C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python311\\python.exe C:\\savage\\ARIA_PRO\\backend\\training\\train_cnn1d.py --symbol EURUSD --npz C:\\savage\\ARIA_PRO\\data\\features_cache\\EURUSD\\train_m15.npz --epochs 15 --batch 64 --lr 0.001 --model_type dilated",
+      "return_code": 2,
+      "elapsed_time": 9.632973909378052,
+      "log_file": "C:\\savage\\ARIA_PRO\\data\\training_logs\\EURUSD\\train_cnn_20250818_005245.log"
+    },
+    "inference": {
+      "command": "C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python311\\python.exe C:\\savage\\ARIA_PRO\\backend\\training\\inference_to_npz.py --symbol EURUSD --npz C:\\savage\\ARIA_PRO\\data\\features_cache\\EURUSD\\train_m15.npz --models lstm xgb cnn",
+      "return_code": 0,
+      "elapsed_time": 4.104357957839966,
+      "log_file": "C:\\savage\\ARIA_PRO\\data\\training_logs\\EURUSD\\inference_20250818_005255.log"
+    },
+    "walk_forward": {
+      "command": "C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python311\\python.exe C:\\savage\\ARIA_PRO\\backend\\training\\walk_forward_orchestrator.py --symbol EURUSD --start 2019-01-01 --end 2024-01-01 --train_months 4 --test_months 2",
+      "return_code": 0,
+      "elapsed_time": 253.51246786117554,
+      "log_file": "C:\\savage\\ARIA_PRO\\data\\training_logs\\EURUSD\\walk_forward_20250818_005259.log"
+    },
+    "calibration": {
+      "command": "C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python311\\python.exe C:\\savage\\ARIA_PRO\\backend\\training\\calibrate_and_fuse.py --symbol EURUSD --npz C:\\savage\\ARIA_PRO\\data\\features_cache\\EURUSD\\train_m15_scored.npz --models lstm xgb cnn --method isotonic",
+      "return_code": 0,
+      "elapsed_time": 55.09812378883362,
+      "log_file": "C:\\savage\\ARIA_PRO\\data\\training_logs\\EURUSD\\calibration_20250818_005713.log"
+    },
+    "deployment": {
+      "deployed_files": [
+        "C:\\savage\\ARIA_PRO\\backend\\models\\cnn_calibrator_eurusd.pkl",
+        "C:\\savage\\ARIA_PRO\\backend\\models\\fusion_model_eurusd.pkl",
+        "C:\\savage\\ARIA_PRO\\backend\\models\\lstm_calibrator_eurusd.pkl",
+        "C:\\savage\\ARIA_PRO\\backend\\models\\xgb_calibrator_eurusd.pkl"
+      ],
+      "target_dir": "C:\\savage\\ARIA_PRO\\backend\\models"
+    }
+  },
+  "end_time": "2025-08-18T00:58:08.828092",
+  "total_time": 375.4659197330475
+}

@@ -1,0 +1,22 @@
+{
+  "symbol": "EURUSD",
+  "config": {
+    "start_date": "2019-01-01T00:00:00",
+    "end_date": "2024-01-01T00:00:00",
+    "train_months": 4,
+    "test_months": 2,
+    "models": [
+      "lstm",
+      "xgb",
+      "cnn"
+    ]
+  },
+  "window_results": [],
+  "final_metrics": {},
+  "gating_weights": {
+    "lstm": 0.0,
+    "xgb": 0.0,
+    "cnn": 0.0
+  },
+  "timestamp": "2025-08-18T08:32:38.624414"
+}

@@ -1,0 +1,21 @@
+fastapi
+uvicorn==0.30.1
+python-dotenv==1.0.1
+httpx
+pytest
+MetaTrader5==5.0.4424; platform_system == "Windows"
+pydantic
+websockets
+pybind11
+numpy==1.26.4
+scipy==1.13.1
+requests
+psutil
+onnxruntime==1.18.1
+Pillow>=10,<12
+tensorflow==2.18.0
+pandas==2.2.2
+aiohttp==3.9.5
+
+slowapi>=0.1.9
+pybreaker>=1.0.0

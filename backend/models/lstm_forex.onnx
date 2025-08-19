@@ -1,0 +1,23 @@
+
+aria-pro:á
+5axes_sq"Constant* 
+value*:Baxes_sq_val 
+6
+inputm"
+ReduceMean*
+axes@@ *
+keepdims 
+
+m
+axes_sqmsq"Squeeze
+
+msqout"Tanharia_lstm_stubZ
+input
+
+
+2
+b
+out
+
+
+B

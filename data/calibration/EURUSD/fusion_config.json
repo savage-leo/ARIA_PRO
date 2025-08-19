@@ -1,0 +1,15 @@
+{
+  "type": "logistic_regression",
+  "input_models": [
+    "lstm",
+    "xgb",
+    "cnn"
+  ],
+  "coefficients": [
+    10.154277990485102,
+    -0.47970263945389835,
+    -0.47970263945389835
+  ],
+  "intercept": -5.004019536593536,
+  "timestamp": "2025-08-18 08:33:22"
+}

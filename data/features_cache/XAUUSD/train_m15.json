@@ -1,0 +1,31 @@
+{
+  "source_file": "C:\\savage\\ARIA_PRO\\data\\parquet\\XAUUSD\\XAUUSD_m1.parquet",
+  "horizon_bars": 8,
+  "return_threshold": 0.0001,
+  "symbol": "XAUUSD",
+  "n_samples": 337,
+  "features": [
+    "label",
+    "target_return",
+    "state",
+    "vol_bucket",
+    "session",
+    "r",
+    "abs_r",
+    "ewma_sig",
+    "atr14",
+    "rsi",
+    "bb_pos",
+    "vol_ratio",
+    "mom5",
+    "mom10",
+    "mom20",
+    "spread_z",
+    "timestamp",
+    "s_lstm",
+    "s_xgb",
+    "s_cnn",
+    "s_ppo"
+  ],
+  "data_hash": "c9f4a5d6"
+}

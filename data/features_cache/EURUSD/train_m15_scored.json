@@ -1,0 +1,37 @@
+{
+  "symbol": "EURUSD",
+  "source_npz": "C:\\savage\\ARIA_PRO\\data\\features_cache\\EURUSD\\train_m15.npz",
+  "models": [
+    "lstm",
+    "xgb",
+    "cnn"
+  ],
+  "results": {
+    "lstm": {
+      "mean": 0.04672170802950859,
+      "std": 0.10915601253509521,
+      "min": 0.0,
+      "max": 0.7327042818069458,
+      "inference_time": 2.692014694213867,
+      "n_predictions": 49904
+    },
+    "xgb": {
+      "mean": 0.5,
+      "std": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "inference_time": 0.0,
+      "n_predictions": 0
+    },
+    "cnn": {
+      "mean": 0.5,
+      "std": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "inference_time": 0.00099945068359375,
+      "n_predictions": 0
+    }
+  },
+  "n_samples": 49920,
+  "timestamp": "2025-08-18 08:31:13"
+}

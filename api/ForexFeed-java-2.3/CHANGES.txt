@@ -1,0 +1,26 @@
+
+ -----------------------------------------------------------------
+ --  Java API CHANGE LOG                                         --
+ -----------------------------------------------------------------
+
+ -- Version 2.3 --
+ - New function: setStartTime           Add support for loading data at a specific Time in history
+ 
+ 
+ -- Version 2.2 --
+ - Minor Performance improvements
+ 
+ 
+ -- Version 2.1 --
+ - New function: getDataCached          Get the currently cached dataset
+ - New function: setAppID               (replaces old function: setAccessKey)
+ - New function: getAppID               (replaces old function: getAccessKey)
+ - Deprecated function: setAccessKey    (replaced by new function: setAppID)
+ - Deprecated function: getAccessKey    (replaced by new function: getAppID)
+ - Minor bug fixes
+ 
+ 
+ -- Version 2.0 --
+ - Initial release in the 2.x series.
+ - This release is drop-in replacement for versions prior to 2.0 and
+   should be compatible with your existing implementations.

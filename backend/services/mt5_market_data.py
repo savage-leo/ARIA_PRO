@@ -1,0 +1,475 @@
+# Replace entire file: backend/services/mt5_market_data.py
+# Persistent MT5 feed with health monitor + kill-on-failure
+import threading
+import time
+import logging
+import asyncio
+import queue
+from typing import Callable, Dict, Any, List, Optional
+from backend.services.ws_broadcaster import broadcast_tick, broadcast_bar
+from backend.services.cpp_integration import cpp_service
+from backend.core.config import get_settings
+
+logger = logging.getLogger("MT5.MARKET")
+try:
+    import MetaTrader5 as mt5
+
+    MT5_AVAILABLE = True
+except Exception:
+    MT5_AVAILABLE = False
+
+
+class FeedUnavailableError(RuntimeError):
+    pass
+
+
+class MT5MarketFeed:
+    """
+    Persistent MT5 tick poller with health monitor.
+    Emits ticks via subscribe_tick(callback(symbol, tick_dict)).
+    If MT5 feed fails or stops, engage kill-switch via callback.
+    """
+
+    def __init__(self, poll_interval: float = 0.1, health_window: int = 10):
+        self.poll_interval = poll_interval
+        self.health_window = health_window
+        self._tick_listeners = {}
+        self._running = False
+        self._threads = []
+        self._tick_q = queue.Queue()
+        self._last_tick_ts = time.time()
+        self._health_lock = threading.Lock()
+        self._connected = False
+        self._kill_cb = None  # callback to call when failing
+        self._symbols = set()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        # Aggregate ticks into bars at configurable interval (default 60s)
+        self.bar_interval = get_settings().mt5_bar_seconds
+        self._bar_state: Dict[str, Dict[str, float]] = {}
+
+    @property
+    def running(self) -> bool:
+        """Expose running state for status reporting."""
+        return self._running
+
+    def connect(self) -> bool:
+        if not MT5_AVAILABLE:
+            logger.warning("MT5 package not available.")
+            return False
+        if self._connected:
+            return True
+        if not mt5.initialize():
+            logger.error("MT5.initialize() failed: %s", mt5.last_error())
+            return False
+        # Optional explicit account login via environment variables
+        try:
+            s = get_settings()
+            login = s.MT5_LOGIN
+            password = s.MT5_PASSWORD
+            server = s.MT5_SERVER
+            if login is not None and password and server:
+                if not mt5.login(login=int(login), password=password, server=server):
+                    logger.error("MT5.login failed: %s", mt5.last_error())
+                else:
+                    logger.info("MT5 login successful to server %s", server)
+        except Exception:
+            logger.debug("MT5 login step skipped or failed", exc_info=True)
+        self._connected = True
+        logger.info("MT5 connected.")
+        return True
+
+    def disconnect(self):
+        if MT5_AVAILABLE and self._connected:
+            try:
+                mt5.shutdown()
+            except Exception:
+                pass
+            self._connected = False
+            logger.info("MT5 disconnected.")
+
+    async def start(self):
+        if self._running:
+            return
+        self._running = True
+        # Capture the running event loop for cross-thread coroutine scheduling
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
+
+        # Preload symbols from env (comma or semicolon separated)
+        try:
+            for sym in get_settings().symbols_list:
+                if not sym:
+                    continue
+                self._symbols.add(sym)
+                try:
+                    if MT5_AVAILABLE:
+                        mt5.symbol_select(sym, True)
+                except Exception:
+                    logger.debug("symbol_select failed for %s", sym, exc_info=True)
+        except Exception:
+            logger.debug("Failed to parse ARIA_SYMBOLS", exc_info=True)
+
+        t = threading.Thread(target=self._poll_loop, daemon=True)
+        t.start()
+        self._threads.append(t)
+        t2 = threading.Thread(target=self._dispatch_loop, daemon=True)
+        t2.start()
+        self._threads.append(t2)
+        t3 = threading.Thread(target=self._health_monitor_loop, daemon=True)
+        t3.start()
+        self._threads.append(t3)
+        logger.info("MT5MarketFeed started.")
+
+    async def stop(self):
+        self._running = False
+        for t in self._threads:
+            try:
+                t.join(timeout=0.5)
+            except Exception:
+                pass
+        self.disconnect()
+
+    def subscribe_tick(
+        self, symbol: str, callback: Callable[[str, Dict[str, Any]], None]
+    ):
+        self._tick_listeners.setdefault(symbol, []).append(callback)
+        self._symbols.add(symbol)
+        try:
+            if MT5_AVAILABLE:
+                mt5.symbol_select(symbol, True)
+        except Exception:
+            logger.debug("mt5.symbol_select failed for %s", symbol, exc_info=True)
+
+    def on_kill(self, cb: Callable[[], None]):
+        """Register kill callback (called when feed fails)"""
+        self._kill_cb = cb
+
+    def _poll_loop(self):
+        while self._running:
+            try:
+                if not self._connected and MT5_AVAILABLE:
+                    self.connect()
+                    if not self._connected:
+                        time.sleep(1.0)
+                        continue
+                for sym in list(self._symbols):
+                    try:
+                        tick = mt5.symbol_info_tick(sym)
+                        if tick is None:
+                            continue
+                        tickd = {
+                            "bid": float(tick.bid),
+                            "ask": float(tick.ask),
+                            "time": float(tick.time),
+                        }
+                        self._tick_q.put((sym, tickd))
+                        with self._health_lock:
+                            self._last_tick_ts = time.time()
+                    except Exception:
+                        logger.exception("Tick poll error for %s", sym)
+                time.sleep(self.poll_interval)
+            except Exception:
+                logger.exception("MT5 poll outer loop error")
+                time.sleep(1.0)
+
+    def _dispatch_loop(self):
+        while self._running:
+            try:
+                sym, tick = self._tick_q.get(timeout=1.0)
+                for cb in list(self._tick_listeners.get(sym, [])):
+                    try:
+                        cb(sym, tick)
+                    except Exception:
+                        logger.exception("Tick callback err")
+                # Broadcast tick to WebSocket clients (best-effort)
+                try:
+                    if self._loop is not None:
+                        asyncio.run_coroutine_threadsafe(
+                            broadcast_tick(
+                                sym,
+                                float(tick.get("bid", 0.0)),
+                                float(tick.get("ask", 0.0)),
+                            ),
+                            self._loop,
+                        )
+                except Exception:
+                    logger.debug("broadcast_tick scheduling failed", exc_info=True)
+
+                # Build bars and emit when the interval elapses
+                try:
+                    self._update_bar_state_and_maybe_emit(
+                        sym,
+                        float(tick.get("bid", 0.0)),
+                        float(tick.get("ask", 0.0)),
+                        float(tick.get("time", time.time())),
+                    )
+                except Exception:
+                    logger.debug("bar state update failed", exc_info=True)
+            except Exception:
+                continue
+
+    def _update_bar_state_and_maybe_emit(
+        self, symbol: str, bid: float, ask: float, ts: float
+    ):
+        """Accumulate ticks into bars and emit to engine + WS when ready."""
+        mid = (bid + ask) / 2.0
+        st = self._bar_state.get(symbol)
+        if not st:
+            st = {
+                "start_ts": int(ts),
+                "open": mid,
+                "high": mid,
+                "low": mid,
+                "close": mid,
+                "volume": 0.0,
+            }
+            self._bar_state[symbol] = st
+
+        st["high"] = max(st["high"], mid)
+        st["low"] = min(st["low"], mid)
+        st["close"] = mid
+        st["volume"] += 1.0
+
+        if int(ts) - st["start_ts"] >= self.bar_interval:
+            bar_ts = float(st["start_ts"])
+            open_p = float(st["open"])
+            high_p = float(st["high"])
+            low_p = float(st["low"])
+            close_p = float(st["close"])
+            vol = float(st["volume"])
+
+            # reset for next bar starting now
+            self._bar_state[symbol] = {
+                "start_ts": int(ts),
+                "open": mid,
+                "high": mid,
+                "low": mid,
+                "close": mid,
+                "volume": 0.0,
+            }
+
+            # Emit bar to C++ SMC engine (best-effort)
+            try:
+                cpp_service.process_bar_data(
+                    symbol=symbol,
+                    open_price=open_p,
+                    high=high_p,
+                    low=low_p,
+                    close=close_p,
+                    volume=vol,
+                    timestamp=bar_ts,
+                )
+            except Exception:
+                logger.debug("cpp_service.process_bar_data failed", exc_info=True)
+
+            # Broadcast bar to WebSocket clients
+            try:
+                if self._loop is not None:
+                    asyncio.run_coroutine_threadsafe(
+                        broadcast_bar(
+                            {
+                                "symbol": symbol,
+                                "open": open_p,
+                                "high": high_p,
+                                "low": low_p,
+                                "close": close_p,
+                                "volume": vol,
+                                "timestamp": bar_ts,
+                            }
+                        ),
+                        self._loop,
+                    )
+            except Exception:
+                logger.debug("broadcast_bar scheduling failed", exc_info=True)
+
+    def _health_monitor_loop(self):
+        """
+        If no ticks for (health_window * poll_interval) seconds, call kill callback.
+        """
+        while self._running:
+            time.sleep(max(1.0, self.poll_interval))
+            with self._health_lock:
+                last = self._last_tick_ts
+            # if we've never connected, continue
+            if not self._connected:
+                continue
+            # threshold - use a more reasonable calculation
+            # Allow up to 30 seconds without ticks before considering it degraded
+            threshold = max(30.0, self.health_window * max(1.0, self.poll_interval))
+            if time.time() - last > threshold:
+                logger.critical(
+                    "MT5 feed health degraded: last tick %.1f seconds ago",
+                    time.time() - last,
+                )
+                if self._kill_cb:
+                    try:
+                        self._kill_cb()
+                    except Exception:
+                        logger.exception("kill callback failed")
+                # mark disconnected and attempt reconnect
+                try:
+                    self.disconnect()
+                except Exception:
+                    pass
+                # give system time to recover; keep running for reconnect attempts
+                time.sleep(5.0)
+
+    def _to_mt5_timeframe(self, timeframe: Any) -> Optional[int]:
+        """Convert timeframe string or int to MetaTrader5 timeframe constant."""
+        if not MT5_AVAILABLE:
+            return None
+        # Accept direct int constants
+        if isinstance(timeframe, int):
+            return timeframe
+        if isinstance(timeframe, str):
+            tf_map = {
+                "M1": mt5.TIMEFRAME_M1,
+                "M2": getattr(mt5, "TIMEFRAME_M2", mt5.TIMEFRAME_M1),
+                "M3": getattr(mt5, "TIMEFRAME_M3", mt5.TIMEFRAME_M1),
+                "M4": getattr(mt5, "TIMEFRAME_M4", mt5.TIMEFRAME_M1),
+                "M5": mt5.TIMEFRAME_M5,
+                "M6": getattr(mt5, "TIMEFRAME_M6", mt5.TIMEFRAME_M5),
+                "M10": getattr(mt5, "TIMEFRAME_M10", mt5.TIMEFRAME_M5),
+                "M12": getattr(mt5, "TIMEFRAME_M12", mt5.TIMEFRAME_M5),
+                "M15": mt5.TIMEFRAME_M15,
+                "M20": getattr(mt5, "TIMEFRAME_M20", mt5.TIMEFRAME_M15),
+                "M30": mt5.TIMEFRAME_M30,
+                "H1": mt5.TIMEFRAME_H1,
+                "H2": getattr(mt5, "TIMEFRAME_H2", mt5.TIMEFRAME_H1),
+                "H3": getattr(mt5, "TIMEFRAME_H3", mt5.TIMEFRAME_H1),
+                "H4": mt5.TIMEFRAME_H4,
+                "H6": getattr(mt5, "TIMEFRAME_H6", mt5.TIMEFRAME_H4),
+                "H8": getattr(mt5, "TIMEFRAME_H8", mt5.TIMEFRAME_H4),
+                "H12": getattr(mt5, "TIMEFRAME_H12", mt5.TIMEFRAME_H4),
+                "D1": mt5.TIMEFRAME_D1,
+                "W1": mt5.TIMEFRAME_W1,
+                "MN1": mt5.TIMEFRAME_MN1,
+            }
+            return tf_map.get(timeframe.upper())
+        return None
+
+    def get_historical_bars(
+        self, symbol: str, timeframe: Any, count: int
+    ) -> List[Dict[str, Any]]:
+        """Fetch last `count` bars for `symbol` at given timeframe.
+        Returns list of dicts with keys: time, open, high, low, close, volume.
+        Safe to call when MT5 is unavailable; returns [] in that case.
+        """
+        try:
+            if not MT5_AVAILABLE:
+                logger.warning("MT5 package not available; returning empty bars list.")
+                return []
+
+            if not self._connected:
+                # attempt lazy connect
+                if not self.connect():
+                    logger.error(
+                        "MT5 not connected and connection failed; returning empty bars."
+                    )
+                    return []
+
+            tf = self._to_mt5_timeframe(timeframe)
+            if tf is None:
+                logger.error("Unsupported timeframe: %s", timeframe)
+                return []
+
+            if count <= 0:
+                return []
+
+            rates = mt5.copy_rates_from_pos(symbol, tf, 0, int(count))
+            if rates is None or len(rates) == 0:
+                return []
+
+            bars: List[Dict[str, Any]] = []
+            for r in rates:
+                # mt5 returns numpy structured array with fields
+                try:
+                    vol = float(r.get("tick_volume", r.get("volume", 0.0)))  # type: ignore[attr-defined]
+                except Exception:
+                    # handle as attribute access when returned as object
+                    vol = float(getattr(r, "tick_volume", getattr(r, "volume", 0.0)))
+                try:
+                    bars.append(
+                        {
+                            "time": (
+                                float(r["time"])
+                                if isinstance(r, dict)
+                                else float(getattr(r, "time"))
+                            ),
+                            "open": (
+                                float(r["open"])
+                                if isinstance(r, dict)
+                                else float(getattr(r, "open"))
+                            ),
+                            "high": (
+                                float(r["high"])
+                                if isinstance(r, dict)
+                                else float(getattr(r, "high"))
+                            ),
+                            "low": (
+                                float(r["low"])
+                                if isinstance(r, dict)
+                                else float(getattr(r, "low"))
+                            ),
+                            "close": (
+                                float(r["close"])
+                                if isinstance(r, dict)
+                                else float(getattr(r, "close"))
+                            ),
+                            "volume": vol,
+                            "symbol": symbol,
+                        }
+                    )
+                except Exception:
+                    # Fallback for numpy structured array access
+                    bars.append(
+                        {
+                            "time": float(r["time"]),
+                            "open": float(r["open"]),
+                            "high": float(r["high"]),
+                            "low": float(r["low"]),
+                            "close": float(r["close"]),
+                            "volume": (
+                                float(r["tick_volume"])
+                                if "tick_volume" in r.dtype.names
+                                else float(r["volume"])
+                            ),
+                            "symbol": symbol,
+                        }
+                    )
+
+            return bars
+        except Exception as e:
+            logger.error(f"Error getting historical bars for {symbol}: {e}")
+            return []
+
+    def get_last_bar(self, symbol: str) -> Dict[str, Any]:
+        """Get last bar for symbol - required by data source manager"""
+        try:
+            if not self._connected:
+                raise FeedUnavailableError("MT5 not connected")
+
+            # Get latest M1 bar
+            bars = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 1)
+            if bars is None or len(bars) == 0:
+                raise FeedUnavailableError(f"No bars available for {symbol}")
+
+            bar = bars[0]
+            return {
+                "time": bar["time"],
+                "open": bar["open"],
+                "high": bar["high"],
+                "low": bar["low"],
+                "close": bar["close"],
+                "volume": bar["tick_volume"],
+                "symbol": symbol,
+            }
+        except Exception as e:
+            logger.error(f"Error getting last bar for {symbol}: {e}")
+            raise FeedUnavailableError(f"Failed to get bar for {symbol}: {e}")
+
+
+# Global instance
+mt5_market_feed = MT5MarketFeed()

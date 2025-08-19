@@ -1,0 +1,43 @@
+{
+  "name": "aria-institutional-pro",
+  "version": "1.2.0",
+  "description": "Real-time Institutional-Grade Forex AI Trading Platform",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && python start_backend.py",
+    "build": "cd frontend && npm run build",
+    "build:production": "cd frontend && npm run build:production",
+    "type-check": "cd frontend && npm run type-check",
+    "lint": "cd frontend && npm run lint",
+    "lint:fix": "cd frontend && npm run lint:fix",
+    "test": "cd frontend && npm run test",
+    "test:backend": "cd backend && python -m pytest",
+    "test:all": "npm run test && npm run test:backend",
+    "format": "cd frontend && npm run format",
+    "clean": "cd frontend && npm run clean",
+    "install:all": "npm install && cd frontend && npm install && cd ../backend && pip install -r requirements.txt",
+    "start:production": "python start_production.py"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "keywords": [
+    "forex",
+    "trading",
+    "ai",
+    "institutional",
+    "mt5",
+    "react",
+    "typescript",
+    "fastapi"
+  ],
+  "author": "ARIA Institutional",
+  "license": "PROPRIETARY"
+}

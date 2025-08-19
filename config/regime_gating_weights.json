@@ -1,0 +1,90 @@
+{
+  "description": "ARIA Institutional Strategy Regime Gating Weights",
+  "version": "1.0",
+  "last_updated": "2024-01-01T00:00:00Z",
+  "gating_rules": {
+    "trend": {
+      "description": "Trend (T) state with significant directional bias",
+      "volatility_buckets": {
+        "low": {
+          "lstm": 1.0,
+          "ppo": 0.8,
+          "xgb": 0.4,
+          "cnn": 0.2
+        },
+        "medium": {
+          "lstm": 1.0,
+          "ppo": 0.8,
+          "xgb": 0.4,
+          "cnn": 0.2
+        },
+        "high": {
+          "comment": "High vol in trend: cap position, halve LSTM/PPO weights",
+          "lstm": 0.5,
+          "ppo": 0.4,
+          "xgb": 0.4,
+          "cnn": 0.2
+        }
+      }
+    },
+    "range": {
+      "description": "Range (R) state with mean-reverting behavior",
+      "volatility_buckets": {
+        "low": {
+          "cnn": 0.9,
+          "xgb": 0.7,
+          "lstm": 0.2,
+          "ppo": 0.1
+        },
+        "medium": {
+          "cnn": 0.9,
+          "xgb": 0.7,
+          "lstm": 0.2,
+          "ppo": 0.1
+        },
+        "high": {
+          "comment": "Range state shouldn't have high vol by definition",
+          "cnn": 0.5,
+          "xgb": 0.4,
+          "lstm": 0.1,
+          "ppo": 0.1
+        }
+      }
+    },
+    "breakout": {
+      "description": "Breakout (B) state with volatility spikes",
+      "volatility_buckets": {
+        "low": {
+          "comment": "Unusual: breakout with low vol",
+          "cnn": 0.4,
+          "ppo": 0.3,
+          "xgb": 0.2,
+          "lstm": 0.1
+        },
+        "medium": {
+          "cnn": 0.6,
+          "ppo": 0.5,
+          "xgb": 0.3,
+          "lstm": 0.2
+        },
+        "high": {
+          "cnn": 0.8,
+          "ppo": 0.7,
+          "xgb": 0.3,
+          "lstm": 0.2
+        }
+      }
+    }
+  },
+  "validation": {
+    "min_weight": 0.0,
+    "max_weight": 1.0,
+    "allow_zero_weights": true,
+    "normalize_per_regime": false
+  },
+  "symbols": [
+    "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "USDCAD", 
+    "AUDUSD", "NZDUSD", "EURJPY", "EURGBP", "GBPJPY", 
+    "AUDJPY", "XAUUSD"
+  ]
+}
