@@ -27,16 +27,14 @@ from backend.services.data_source_manager import data_source_manager
 from backend.services.auto_trader import auto_trader
 from backend.services.mt5_market_data import mt5_market_feed
 from backend.services.cpp_integration import cpp_service
-from backend.monitoring.llm_monitor import llm_monitor_service
 from backend.core.performance_monitor import get_performance_monitor
 import asyncio
 import os
 import logging
 from logging.handlers import RotatingFileHandler
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-from starlette.middleware.base import BaseHTTPMiddleware
+from slowapi.errors import RateLimitExceeded
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from urllib.parse import urlparse
 from backend.core.config import get_settings, Settings

@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: aria-backend
+    env: python
+    buildCommand: pip install -r production_requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHONPATH
+        value: /opt/render/project/src
+      - key: PORT
+        value: 8000
+    autoDeploy: false
