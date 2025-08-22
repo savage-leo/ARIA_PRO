@@ -22,7 +22,8 @@
     "start:production": "python start_production.py"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "eslint": "^9.33.0"
   },
   "engines": {
     "node": ">=18.0.0",

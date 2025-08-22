@@ -5,8 +5,8 @@ ARIA PRO Production Monitoring Dashboard
 Real-time system metrics and trading performance monitoring
 """
 
-from fastapi import APIRouter, HTTPException, Response
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, HTTPException, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse
 from typing import Dict, Any, List
 import time
 import psutil
@@ -17,8 +17,10 @@ import logging
 import importlib.util as importlib_util
 import pathlib
 import math
+import asyncio
 
 from backend.services.auto_trader import auto_trader
+from backend.core.performance_monitor import get_performance_monitor
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/monitoring", tags=["Monitoring"])
@@ -438,9 +440,11 @@ def metrics_prom() -> Response:
         lines += [
             "# HELP aria_latency_ms Decision latency ms",
             "# TYPE aria_latency_ms summary",
+            f'aria_latency_ms{{quantile="0.01"}} {pct(0.01)}',
             f'aria_latency_ms{{quantile="0.5"}} {pct(0.5)}',
             f'aria_latency_ms{{quantile="0.95"}} {pct(0.95)}',
             f'aria_latency_ms{{quantile="0.99"}} {pct(0.99)}',
+            f'aria_latency_ms{{quantile="0.999"}} {pct(0.999)}',
             f"aria_latency_ms_sum {sum(lat)}",
             f"aria_latency_ms_count {len(lat)}",
         ]
@@ -517,3 +521,92 @@ async def get_auto_trader_status() -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error getting AutoTrader status: {e}")
         return {"ok": False, "error": str(e)}
+
+
+# Performance Monitoring Endpoints
+@router.get("/performance/metrics")
+async def get_performance_metrics():
+    """Get current performance metrics for all models and system."""
+    try:
+        monitor = get_performance_monitor()
+        return {
+            "system": monitor.get_system_metrics(),
+            "models": monitor.get_metrics(),
+            "symbols": monitor.get_symbol_metrics(),
+            "thresholds": monitor.thresholds,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/performance/models/{model_name}")
+async def get_model_metrics(model_name: str):
+    """Get detailed metrics for a specific model."""
+    monitor = get_performance_monitor()
+    metrics = monitor.get_metrics(model_name)
+    if not metrics:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"No metrics found for model: {model_name}"}
+        )
+    return metrics
+
+
+@router.get("/performance/symbols")
+async def get_symbols_metrics():
+    """Get per-symbol metrics for all symbols."""
+    try:
+        monitor = get_performance_monitor()
+        return monitor.get_symbol_metrics()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/performance/symbols/{symbol}")
+async def get_symbol_metrics(symbol: str):
+    """Get per-symbol metrics for a specific symbol."""
+    monitor = get_performance_monitor()
+    metrics = monitor.get_symbol_metrics(symbol)
+    if not metrics:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"No metrics found for symbol: {symbol}"}
+        )
+    return metrics
+
+
+@router.get("/performance/thresholds")
+async def get_thresholds():
+    """Get current monitoring thresholds (from environment with defaults)."""
+    monitor = get_performance_monitor()
+    return monitor.thresholds
+
+
+@router.websocket("/ws/performance")
+async def websocket_performance_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for real-time performance monitoring."""
+    await websocket.accept()
+    monitor = get_performance_monitor()
+    monitor.add_connection(websocket)
+    
+    try:
+        # Start monitoring if not already started
+        await monitor.start_monitoring()
+        
+        while True:
+            # Keep connection alive and handle incoming messages
+            try:
+                message = await websocket.receive_text()
+                # Handle any client messages if needed
+                if message == "ping":
+                    await websocket.send_json({"type": "pong", "timestamp": time.time()})
+            except Exception as e:
+                logger.debug(f"WebSocket message handling error: {e}")
+                break
+                
+    except WebSocketDisconnect:
+        logger.info("Performance monitoring WebSocket disconnected")
+    except Exception as e:
+        logger.error(f"Performance monitoring WebSocket error: {e}")
+    finally:
+        monitor.remove_connection(websocket)

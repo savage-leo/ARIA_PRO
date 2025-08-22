@@ -1,0 +1,89 @@
+{
+  "test_time": "2025-08-21T10:36:58.584564",
+  "deployment_status": "\u274c NEEDS ATTENTION",
+  "summary": {
+    "total_tests": 8,
+    "passed": 2,
+    "failed": 6,
+    "success_rate": "25.0%"
+  },
+  "results": [
+    {
+      "test": "Health Check",
+      "status": "PASS",
+      "details": {
+        "status_code": 200
+      },
+      "error": null,
+      "timestamp": "2025-08-21T10:35:54.171962"
+    },
+    {
+      "test": "Model Inventory",
+      "status": "PASS",
+      "details": {
+        "total_models": 12,
+        "local_models": 4,
+        "remote_models": 8
+      },
+      "error": null,
+      "timestamp": "2025-08-21T10:35:55.668709"
+    },
+    {
+      "test": "Local Model Generation",
+      "status": "FAIL",
+      "details": {},
+      "error": "",
+      "timestamp": "2025-08-21T10:36:25.698433"
+    },
+    {
+      "test": "Task Routing (code)",
+      "status": "FAIL",
+      "details": {
+        "status_code": 401,
+        "note": "Expected to fall back to local models"
+      },
+      "error": null,
+      "timestamp": "2025-08-21T10:36:39.994347"
+    },
+    {
+      "test": "Task Routing (strategy)",
+      "status": "FAIL",
+      "details": {
+        "status_code": 401,
+        "note": "Expected to fall back to local models"
+      },
+      "error": null,
+      "timestamp": "2025-08-21T10:36:45.240323"
+    },
+    {
+      "test": "Task Routing (fast)",
+      "status": "FAIL",
+      "details": {
+        "status_code": 401,
+        "note": "Expected to fall back to local models"
+      },
+      "error": null,
+      "timestamp": "2025-08-21T10:36:51.368498"
+    },
+    {
+      "test": "Chat Interface",
+      "status": "FAIL",
+      "details": {
+        "status_code": 401,
+        "note": "Expected to fall back to local models"
+      },
+      "error": null,
+      "timestamp": "2025-08-21T10:36:56.553610"
+    },
+    {
+      "test": "Direct Remote Model",
+      "status": "FAIL",
+      "details": {
+        "status_code": 401,
+        "note": "API key authentication issue"
+      },
+      "error": null,
+      "timestamp": "2025-08-21T10:36:58.571676"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "timestamp": "2025-08-21T06:05:19.345117",
+    "event": "deployment",
+    "message": "Starting proxy process",
+    "data": {}
+  },
+  {
+    "timestamp": "2025-08-21T06:05:19.471143",
+    "event": "deployment",
+    "message": "Proxy started with PID: 22024",
+    "data": {}
+  },
+  {
+    "timestamp": "2025-08-21T06:05:40.533197",
+    "event": "health",
+    "message": "Health endpoint: 200",
+    "data": {}
+  },
+  {
+    "timestamp": "2025-08-21T06:05:45.760273",
+    "event": "health",
+    "message": "Model listing: 12 models available",
+    "data": {}
+  },
+  {
+    "timestamp": "2025-08-21T06:05:56.010133",
+    "event": "error",
+    "message": "Health test failed: ",
+    "data": {}
+  }
+]

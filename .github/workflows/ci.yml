@@ -60,7 +60,34 @@ jobs:
         python -m pytest tests/ -v --tb=short
       env:
         ARIA_ENABLE_MT5: "0"
+        RUN_AUTOTRADER_INTEGRATION: "0"
         ARIA_LOG_LEVEL: "INFO"
+
+  monitoring-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install minimal Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install fastapi httpx pytest pytest-asyncio websockets websocket-client psutil numpy
+
+      - name: Run monitoring tests (isolated)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          ARIA_ENABLE_MT5: "0"
+          RUN_AUTOTRADER_INTEGRATION: "0"
+        run: |
+          python -m pytest backend/tests/test_monitoring_endpoints.py -q
 
   integration-test:
     runs-on: ubuntu-latest
@@ -99,3 +126,37 @@ jobs:
           -H "Content-Type: application/json" \
           -d '{"symbol":"EURUSD","timeframe":"M5","bars":100}' || exit 1
         curl -f http://localhost:8000/api/analytics/performance-metrics?days=30 || exit 1
+
+  windows-autotrader-integration:
+    runs-on: windows-latest
+    needs: [backend-test]
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Upgrade pip
+        run: |
+          python -m pip install --upgrade pip
+
+      - name: Install backend requirements (Windows)
+        working-directory: ./backend
+        run: |
+          pip install -r requirements.txt
+
+      - name: Verify MetaTrader5 import
+        run: |
+          python -c "import MetaTrader5 as mt5; print('MetaTrader5 version:', getattr(mt5, '__version__', 'unknown'))"
+
+      - name: Run AutoTrader integration test
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          RUN_AUTOTRADER_INTEGRATION: '1'
+          ARIA_ENABLE_MT5: '1'
+        run: |
+          python -m pytest backend/tests/test_monitoring_endpoints.py -k integration -q

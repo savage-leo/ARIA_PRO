@@ -1,0 +1,45 @@
+name: Backend Monitoring Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/monitoring-tests.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/monitoring-tests.yml'
+
+concurrency:
+  group: monitoring-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  monitoring-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install minimal Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install fastapi httpx pytest pytest-asyncio websockets websocket-client psutil numpy
+
+      - name: Run monitoring tests (isolated)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          ARIA_ENABLE_MT5: '0'
+          RUN_AUTOTRADER_INTEGRATION: '0'
+        run: |
+          python -m pytest backend/tests/test_monitoring_endpoints.py -q

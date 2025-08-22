@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 from collections import deque
 import json
+from backend.core.performance_monitor import track_performance
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ class QuickProfitEngine:
             'max_drawdown': 0.05  # 5% daily drawdown limit
         }
         
+    @track_performance("QuickProfitEngine.analyze_opportunity")
     async def analyze_opportunity(self, symbol: str, market_data: Dict) -> Dict[str, Any]:
         """Analyze market for quick profit opportunities"""
         opportunities = []
@@ -80,6 +82,7 @@ class LatencyArbitrageStrategy:
         self.latency_threshold = 0.001  # 1ms price difference
         self.min_spread = 2  # Min 2 pips difference
         
+    @track_performance("LatencyArbitrageStrategy.detect_opportunity")
     async def detect_opportunity(self, symbol: str, market_data: Dict) -> Optional[Dict]:
         """Detect arbitrage opportunity between price feeds"""
         
@@ -123,6 +126,7 @@ class NewsSpikeStrategy:
         self.spike_threshold = 10  # Min 10 pip movement
         self.volatility_window = deque(maxlen=100)
         
+    @track_performance("NewsSpikeStrategy.detect_opportunity")
     async def detect_opportunity(self, symbol: str, market_data: Dict) -> Optional[Dict]:
         """Detect news-driven volatility spikes"""
         
@@ -165,6 +169,7 @@ class SpreadScalpingStrategy:
         self.spread_history = deque(maxlen=50)
         self.min_spread_pips = 0.5
         
+    @track_performance("SpreadScalpingStrategy.detect_opportunity")
     async def detect_opportunity(self, symbol: str, market_data: Dict) -> Optional[Dict]:
         """Detect spread scalping opportunities"""
         
@@ -209,6 +214,7 @@ class MomentumBurstStrategy:
         self.momentum_window = 20
         self.burst_threshold = 0.002  # 0.2% move
         
+    @track_performance("MomentumBurstStrategy.detect_opportunity")
     async def detect_opportunity(self, symbol: str, market_data: Dict) -> Optional[Dict]:
         """Detect momentum burst opportunities"""
         

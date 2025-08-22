@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Card, CardContent, Typography, Grid, CircularProgress, Chip, FormControl, Select, MenuItem, InputLabel } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material/Select';
-import { TrendingUp, TrendingDown, ShowChart, Assessment } from '@mui/icons-material';
+import { RiseOutlined, FallOutlined, LineChartOutlined, BarChartOutlined } from '@ant-design/icons';
 
 interface PerformanceData {
   total_return: number;
@@ -137,7 +137,7 @@ export const PerformanceMetrics: React.FC = () => {
           <MetricCard
             title="TOTAL RETURN"
             value={data.total_return}
-            icon={<TrendingUp sx={{ color: data.total_return >= 0 ? '#22d3ee' : '#ff4040' }} />}
+            icon={<RiseOutlined style={{ color: data.total_return >= 0 ? '#22d3ee' : '#ff4040' }} />}
             color={data.total_return >= 0 ? '#22d3ee' : '#ff4040'}
             prefix="$"
           />
@@ -147,7 +147,7 @@ export const PerformanceMetrics: React.FC = () => {
           <MetricCard
             title="WIN RATE"
             value={data.win_rate}
-            icon={<Assessment sx={{ color: '#22d3ee' }} />}
+            icon={<BarChartOutlined style={{ color: '#22d3ee' }} />}
             suffix="%"
           />
         </Grid>
@@ -156,7 +156,7 @@ export const PerformanceMetrics: React.FC = () => {
           <MetricCard
             title="SHARPE RATIO"
             value={data.sharpe_ratio}
-            icon={<ShowChart sx={{ color: data.sharpe_ratio >= 1 ? '#22d3ee' : '#ffaa00' }} />}
+            icon={<LineChartOutlined style={{ color: data.sharpe_ratio >= 1 ? '#22d3ee' : '#ffaa00' }} />}
             color={data.sharpe_ratio >= 1 ? '#22d3ee' : '#ffaa00'}
           />
         </Grid>
@@ -165,7 +165,7 @@ export const PerformanceMetrics: React.FC = () => {
           <MetricCard
             title="MAX DRAWDOWN"
             value={data.max_drawdown}
-            icon={<TrendingDown sx={{ color: '#ff4040' }} />}
+            icon={<FallOutlined style={{ color: '#ff4040' }} />}
             color="#ff4040"
             suffix="%"
           />
@@ -175,7 +175,7 @@ export const PerformanceMetrics: React.FC = () => {
           <MetricCard
             title="PROFIT FACTOR"
             value={data.profit_factor === Infinity ? 999 : data.profit_factor}
-            icon={<Assessment sx={{ color: data.profit_factor >= 1.5 ? '#22d3ee' : '#ffaa00' }} />}
+            icon={<BarChartOutlined style={{ color: data.profit_factor >= 1.5 ? '#22d3ee' : '#ffaa00' }} />}
             color={data.profit_factor >= 1.5 ? '#22d3ee' : '#ffaa00'}
           />
         </Grid>
@@ -184,7 +184,7 @@ export const PerformanceMetrics: React.FC = () => {
           <MetricCard
             title="TOTAL TRADES"
             value={data.total_trades}
-            icon={<Assessment sx={{ color: '#22d3ee' }} />}
+            icon={<BarChartOutlined style={{ color: '#22d3ee' }} />}
           />
         </Grid>
 
@@ -192,7 +192,7 @@ export const PerformanceMetrics: React.FC = () => {
           <MetricCard
             title="AVG TRADE"
             value={data.avg_trade}
-            icon={<ShowChart sx={{ color: data.avg_trade >= 0 ? '#22d3ee' : '#ff4040' }} />}
+            icon={<LineChartOutlined style={{ color: data.avg_trade >= 0 ? '#22d3ee' : '#ff4040' }} />}
             color={data.avg_trade >= 0 ? '#22d3ee' : '#ff4040'}
             prefix="$"
           />

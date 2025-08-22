@@ -1,0 +1,185 @@
+{
+  "audit_time": "2025-08-21T10:30:53.274717",
+  "summary": {
+    "total_tests": 12,
+    "passed": 7,
+    "failed": 5,
+    "success_rate": "58.3%"
+  },
+  "components": {
+    "PROXY": {
+      "total": 7,
+      "passed": 3,
+      "failed": 4
+    },
+    "OLLAMA": {
+      "total": 2,
+      "passed": 1,
+      "failed": 1
+    },
+    "CONFIG": {
+      "total": 3,
+      "passed": 3,
+      "failed": 0
+    }
+  },
+  "critical_issues": 1,
+  "results": [
+    {
+      "timestamp": "2025-08-21T10:28:24.588395",
+      "component": "PROXY",
+      "test": "Health Check",
+      "status": "PASS",
+      "details": {
+        "status_code": 200,
+        "response": {
+          "status": "ok"
+        }
+      },
+      "error": null
+    },
+    {
+      "timestamp": "2025-08-21T10:28:26.272505",
+      "component": "OLLAMA",
+      "test": "Health Check",
+      "status": "PASS",
+      "details": {
+        "status_code": 200,
+        "models_count": 4,
+        "model_names": [
+          "mistral:latest",
+          "nomic-embed-text:latest",
+          "qwen2.5-coder:1.5b-base",
+          "gemma3:4b"
+        ]
+      },
+      "error": null
+    },
+    {
+      "timestamp": "2025-08-21T10:28:28.450628",
+      "component": "PROXY",
+      "test": "Model Inventory",
+      "status": "PASS",
+      "details": {
+        "total_models": 12,
+        "local_models": 4,
+        "remote_models": 8,
+        "local_model_names": [
+          "mistral:latest",
+          "nomic-embed-text:latest",
+          "qwen2.5-coder:1.5b-base",
+          "gemma3:4b"
+        ],
+        "remote_model_names": [
+          "llama-3.1-405b",
+          "llama-3.3-70b",
+          "qwen-coder-32b",
+          "deepseek-r1-14b",
+          "qwen-vl-72b",
+          "reka-flash-3",
+          "qwq-32b",
+          "llama-3.2-3b"
+        ]
+      },
+      "error": null
+    },
+    {
+      "timestamp": "2025-08-21T10:29:30.190589",
+      "component": "OLLAMA",
+      "test": "Model Generation",
+      "status": "FAIL",
+      "details": {},
+      "error": ""
+    },
+    {
+      "timestamp": "2025-08-21T10:30:25.739621",
+      "component": "PROXY",
+      "test": "Model Generation",
+      "status": "PASS",
+      "details": {
+        "status_code": 200,
+        "model_used": "qwen2.5-coder:1.5b-base",
+        "response_length": 741,
+        "response_preview": " that takes two integers as inputs and returns the sum of the numbers. The input parameters must be ..."
+      },
+      "error": null
+    },
+    {
+      "timestamp": "2025-08-21T10:30:32.430685",
+      "component": "PROXY",
+      "test": "Task Routing (code)",
+      "status": "FAIL",
+      "details": {
+        "status_code": 401,
+        "expected_error": "API key authentication required"
+      },
+      "error": null
+    },
+    {
+      "timestamp": "2025-08-21T10:30:40.990353",
+      "component": "PROXY",
+      "test": "Task Routing (strategy)",
+      "status": "FAIL",
+      "details": {
+        "status_code": 401,
+        "expected_error": "API key authentication required"
+      },
+      "error": null
+    },
+    {
+      "timestamp": "2025-08-21T10:30:46.690384",
+      "component": "PROXY",
+      "test": "Task Routing (fast)",
+      "status": "FAIL",
+      "details": {
+        "status_code": 401,
+        "expected_error": "API key authentication required"
+      },
+      "error": null
+    },
+    {
+      "timestamp": "2025-08-21T10:30:53.244332",
+      "component": "PROXY",
+      "test": "Chat Interface",
+      "status": "FAIL",
+      "details": {
+        "status_code": 401,
+        "expected_error": "API key authentication required"
+      },
+      "error": null
+    },
+    {
+      "timestamp": "2025-08-21T10:30:53.259330",
+      "component": "CONFIG",
+      "test": "Proxy File Exists",
+      "status": "PASS",
+      "details": {
+        "file_path": "backend/services/institutional_proxy.py",
+        "file_size": 18421
+      },
+      "error": null
+    },
+    {
+      "timestamp": "2025-08-21T10:30:53.261337",
+      "component": "CONFIG",
+      "test": "Startup Script: start_proxy_for_aria.py",
+      "status": "PASS",
+      "details": {
+        "file_path": "start_proxy_for_aria.py",
+        "file_size": 2276
+      },
+      "error": null
+    },
+    {
+      "timestamp": "2025-08-21T10:30:53.263333",
+      "component": "CONFIG",
+      "test": "Startup Script: scripts/start_institutional_proxy.ps1",
+      "status": "PASS",
+      "details": {
+        "file_path": "scripts/start_institutional_proxy.ps1",
+        "file_size": 859
+      },
+      "error": null
+    }
+  ]
+}

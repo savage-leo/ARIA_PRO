@@ -4,7 +4,11 @@ import os
 import time
 from collections import deque
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Set
+
+from fastapi import WebSocket
+import contextlib
+import numpy as np
 
 from backend.services.mt5_market_data import mt5_market_feed
 from backend.services.ai_signal_generator import ai_signal_generator
@@ -12,17 +16,22 @@ from backend.services.risk_engine import risk_engine
 from backend.smc.smc_fusion_core import get_enhanced_engine
 from backend.smc.bias_engine import BiasEngine
 from backend.services.real_ai_signal_generator import real_ai_signal_generator
-from backend.core.regime import RegimeDetector, Regime
 from backend.core.fusion import SignalFusion
-from backend.core.risk_budget import RiskBudgetEngine
-from backend.strategies.quick_profit_engine import quick_profit_engine
+from backend.core.regime import RegimeDetector, Regime
+from backend.core.config import get_settings
+from backend.core.risk_budget import RiskBudget
+from backend.core.neural_trade_journal import get_neural_journal
+from backend.core.meta_rl_selector import get_meta_selector
+from backend.core.cross_agent_reasoning import get_cross_agent_reasoning
+from backend.core.llm_gatekeeper import get_llm_gatekeeper
+from backend.core.performance_monitor import get_performance_monitor, track_performance
+from backend.core.microstructure_alpha import get_microstructure_alpha
+from backend.smc.quick_profit_engine import quick_profit_engine
 from backend.strategies.arbitrage_detector import arbitrage_detector
 from backend.strategies.news_trading import news_trading_system
-from backend.core.config import get_settings
-
 # Import MT5 executor lazily inside methods to avoid hard fail if MT5 not configured
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("AutoTrader")
 
 
 class AutoTrader:
@@ -74,13 +83,33 @@ class AutoTrader:
         self.enable_news_trading: bool = bool(settings.ENABLE_NEWS_TRADING)
 
         # Per-symbol fusion instances (initialized on first use based on observed signal keys)
-        self._fusion_by_symbol: Dict[str, SignalFusion] = {}
+        self._fusion_by_symbol: Dict[str, Optional[SignalFusion]] = {}
         # Unified RiskBudget engine
-        self._risk_budget = RiskBudgetEngine()
+        self._risk_budget = RiskBudget()
 
         self._last_trade_ts: Dict[str, float] = {}
         # Param lock for safe runtime tuning updates
         self._param_lock: asyncio.Lock = asyncio.Lock()
+
+        # Runtime counters/state
+        self.signals_today: int = 0
+        self.executed_today: int = 0
+        self._counters_day: str = datetime.now().strftime("%Y-%m-%d")
+        self._started_at: Optional[float] = None
+        self._stop_event: asyncio.Event = asyncio.Event()
+        self._task: Optional[asyncio.Task] = None
+
+        # WebSocket clients
+        self._clients: Set[WebSocket] = set()
+        self._clients_lock: asyncio.Lock = asyncio.Lock()
+        
+        # Initialize neural trade journal and microstructure alpha
+        self.neural_journal = get_neural_journal()
+        self.microstructure_alpha = get_microstructure_alpha()
+        self.meta_selector = get_meta_selector()
+        self.llm_gatekeeper = get_llm_gatekeeper()
+        self.cross_agent_pipeline = get_cross_agent_reasoning()
+        self.performance_monitor = get_performance_monitor()
 
     @staticmethod
     def _parse_symbols(text: str) -> List[str]:
@@ -91,6 +120,9 @@ class AutoTrader:
             logger.warning("AutoTrader already running")
             return
         self.running = True
+        self._stop_event.clear()
+        self._started_at = time.time()
+        self._task = asyncio.current_task()
         logger.info(
             f"AutoTrader starting: symbols={self.symbols}, interval={self.interval_sec}s, "
             f"thresh={self.threshold}, primary={self.primary_model}, dry_run={self.dry_run}"
@@ -104,26 +136,97 @@ class AutoTrader:
             except Exception:
                 logger.exception("Adapter warm-up failed")
 
-            while self.running:
+            # Initial broadcast
+            await self._broadcast_status()
+
+            while self.running and not self._stop_event.is_set():
                 await self._tick()
-                await asyncio.sleep(self.interval_sec)
+                # Sleep with stop awareness
+                try:
+                    await asyncio.wait_for(self._stop_event.wait(), timeout=self.interval_sec)
+                except asyncio.TimeoutError:
+                    pass
         except asyncio.CancelledError:
             logger.info("AutoTrader cancelled")
         except Exception:
             logger.exception("AutoTrader crashed; stopping")
         finally:
             self.running = False
+            self._task = None
+            try:
+                await self._broadcast_status()
+            except Exception:
+                pass
 
     async def stop(self) -> None:
+        logger.info("AutoTrader stopping gracefully...")
         self.running = False
-        logger.info("AutoTrader stopping...")
+        self._stop_event.set()
+        task = self._task
+        if task and task is not asyncio.current_task() and not task.done():
+            try:
+                await asyncio.wait_for(task, timeout=10)
+            except Exception:
+                logger.warning("AutoTrader stop wait timed out")
+        self._task = None
+        try:
+            await self._broadcast_status()
+        except Exception:
+            pass
 
     async def _tick(self) -> None:
+        self._ensure_today_counters()
         for symbol in self.symbols:
             try:
                 await self._process_symbol(symbol)
             except Exception:
                 logger.exception(f"AutoTrader symbol loop error for {symbol}")
+
+    def _ensure_today_counters(self) -> None:
+        today = datetime.now().strftime("%Y-%m-%d")
+        if self._counters_day != today:
+            self._counters_day = today
+            self.signals_today = 0
+            self.executed_today = 0
+
+    async def register_client(self, websocket: WebSocket) -> None:
+        await websocket.accept()
+        async with self._clients_lock:
+            self._clients.add(websocket)
+        # Send initial snapshot
+        try:
+            await websocket.send_json({
+                "type": "auto_trader_status",
+                "status": self.get_status(),
+            })
+        except Exception:
+            pass
+
+    def unregister_client(self, websocket: WebSocket) -> None:
+        try:
+            # No await needed for discard
+            if websocket in self._clients:
+                self._clients.discard(websocket)
+        except Exception:
+            pass
+
+    async def _broadcast_status(self) -> None:
+        # Snapshot status once per broadcast
+        status = self.get_status()
+        async with self._clients_lock:
+            if not self._clients:
+                return
+            dead: List[WebSocket] = []
+            for ws in list(self._clients):
+                try:
+                    await ws.send_json({
+                        "type": "auto_trader_status",
+                        "status": status,
+                    })
+                except Exception:
+                    dead.append(ws)
+            for ws in dead:
+                self._clients.discard(ws)
 
     def _get_ohlcv_with_fallback(
         self, symbol: str, n: int, use_intraday: bool = True
@@ -177,6 +280,7 @@ class AutoTrader:
 
         return []
 
+    @track_performance("AutoTrader._process_symbol")
     async def _process_symbol(self, symbol: str) -> None:
         # Enforce cooldown
         now = datetime.now().timestamp()
@@ -224,18 +328,42 @@ class AutoTrader:
 
         # Generate raw AI signals and enhanced market features
         try:
-            # _generate_ai_signals is synchronous; offload to a thread to run concurrently
-            raw_signals_task = asyncio.to_thread(
-                real_ai_signal_generator._generate_ai_signals, symbol, bars
+            # Use parallel inference for 50ms latency - track performance
+            with self.performance_monitor.track_model("AI_Signal_Generation"):
+                raw_signals_coro = real_ai_signal_generator._generate_ai_signals_parallel(symbol, bars)
+                market_feats_coro = real_ai_signal_generator._build_market_features(symbol, bars)
+                
+                # Also get microstructure alpha signals
+                market_data = {
+                    'bid': price - 0.00005,  # Approximate bid
+                    'ask': price + 0.00005,  # Approximate ask
+                    'price': price,
+                    'volume': latest_bar['v'],
+                    'timestamp': latest_bar['ts'],
+                    'trade_count': 1
+                }
+                micro_signals_coro = self.microstructure_alpha.extract_alpha(symbol, market_data)
+                
+                # Gather all signals in parallel
+                raw_signals, market_feats, micro_signals = await asyncio.gather(
+                    raw_signals_coro, market_feats_coro, micro_signals_coro
+                )
+                raw_signals = raw_signals or {}
+                market_feats = market_feats or {}
+            
+            # Query similar trades from neural journal for bias adjustment
+            trade_bias = await self.neural_journal.get_trade_bias(
+                symbol=symbol,
+                price=price,
+                regime=market_feats.get('regime', 'range'),
+                ai_consensus=np.mean(list(raw_signals.values())) if raw_signals else 0.0
             )
-            market_feats_coro = real_ai_signal_generator._build_market_features(
-                symbol, bars
-            )
-            raw_signals, market_feats = await asyncio.gather(
-                raw_signals_task, market_feats_coro
-            )
-            raw_signals = raw_signals or {}
-            market_feats = market_feats or {}
+            
+            # Add microstructure signals to market features
+            market_feats['execution_edge'] = micro_signals.execution_edge
+            market_feats['flow_toxicity'] = micro_signals.flow_toxicity
+            market_feats['liquidity_score'] = micro_signals.liquidity_score
+            market_feats['trade_memory_bias'] = trade_bias
         except Exception as e:
             logger.exception(
                 "AI signal/market feature generation failed for %s: %s", symbol, str(e)
@@ -307,41 +435,7 @@ class AutoTrader:
             except Exception as e:
                 logger.error(f"News trading detection failed for {symbol}: {e}")
 
-    async def apply_tuning(
-        self,
-        *,
-        interval_sec: Optional[int] = None,
-        threshold: Optional[float] = None,
-        atr_period: Optional[int] = None,
-        atr_sl_mult: Optional[float] = None,
-        atr_tp_mult: Optional[float] = None,
-        cooldown_sec: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """Apply bounded runtime tuning updates. Returns dict of changes applied."""
-        changes: Dict[str, Any] = {}
-        async with self._param_lock:
-            if interval_sec is not None and interval_sec != self.interval_sec:
-                self.interval_sec = int(interval_sec)
-                changes["interval_sec"] = self.interval_sec
-            if threshold is not None and threshold != self.threshold:
-                self.threshold = float(threshold)
-                changes["threshold"] = self.threshold
-            if atr_period is not None and atr_period != self.atr_period:
-                self.atr_period = int(atr_period)
-                changes["atr_period"] = self.atr_period
-            if atr_sl_mult is not None and atr_sl_mult != self.atr_sl_mult:
-                self.atr_sl_mult = float(atr_sl_mult)
-                changes["atr_sl_mult"] = self.atr_sl_mult
-            if atr_tp_mult is not None and atr_tp_mult != self.atr_tp_mult:
-                self.atr_tp_mult = float(atr_tp_mult)
-                changes["atr_tp_mult"] = self.atr_tp_mult
-            if cooldown_sec is not None and cooldown_sec != self.cooldown_sec:
-                self.cooldown_sec = int(cooldown_sec)
-                changes["cooldown_sec"] = self.cooldown_sec
-
-        if changes:
-            logger.info("AutoTrader parameters updated: %s", changes)
-        return changes
+        # Regime detection (EWMA vol + 3-state)
 
         # Regime detection (EWMA vol + 3-state)
         try:
@@ -470,6 +564,134 @@ class AutoTrader:
                             0.8  # Reduce confidence if edge is weak in breakout regime
                         )
 
+                # Apply trade memory bias from neural journal
+                trade_memory_bias = market_feats.get('trade_memory_bias', 1.0)
+                new_conf *= trade_memory_bias
+                
+                # Apply microstructure execution edge
+                execution_edge = market_feats.get('execution_edge', 0.0)
+                if execution_edge > 0.5:
+                    new_conf *= 1.05  # Boost confidence with good execution conditions
+                elif execution_edge < 0.2:
+                    new_conf *= 0.95  # Reduce confidence with poor execution conditions
+
+                # Get Meta-RL strategy selection
+                meta_context = {
+                    'regime': used_regime,
+                    'volatility': float(market_feats.get('volatility', 0.01)),
+                    'trend': float(raw_signals.get('lstm', 0.0)),
+                    'session': market_feats.get('session', 'unknown'),
+                    'symbol_performance': {symbol: float(raw_signals.get('xgboost', 0.0))}
+                }
+                
+                try:
+                    meta_action = await self.meta_selector.select_strategies(meta_context)
+                    
+                    # Apply meta-RL risk multiplier
+                    new_conf *= meta_action.risk_multiplier
+                    
+                    # Log meta-RL decision
+                    logger.info(
+                        "Meta-RL: %s | Risk mult: %.2f | %s",
+                        meta_action.reasoning,
+                        meta_action.risk_multiplier,
+                        meta_action.time_horizon
+                    )
+                    
+                    # Store meta action in idea for execution reference
+                    idea.meta['meta_rl'] = {
+                        'strategy_weights': meta_action.strategy_weights,
+                        'time_horizon': meta_action.time_horizon,
+                        'primary_strategy': max(meta_action.strategy_weights, key=meta_action.strategy_weights.get)
+                    }
+                except Exception as e:
+                    logger.error("Meta-RL selection failed: %s", str(e))
+                
+                # Cross-Agent Reasoning for collective decision
+                try:
+                    agent_context = {
+                        'symbol': symbol,
+                        'price': price,
+                        'ai_signals': raw_signals,
+                        'regime': used_regime,
+                        'volatility': float(market_feats.get('volatility', 0.01)),
+                        'volume': float(latest_bar['v']),
+                        'atr': atr_val,
+                        'spread': spread,
+                        'microstructure': {
+                            'execution_edge': market_feats.get('execution_edge', 0.0),
+                            'flow_toxicity': market_feats.get('flow_toxicity', 0.0),
+                            'liquidity_score': market_feats.get('liquidity_score', 0.5)
+                        }
+                    }
+                    
+                    # Get consensus from multiple agents
+                    consensus = await self.cross_agent_pipeline.get_consensus(
+                        signal_data=raw_signals,
+                        market_data=agent_context
+                    )
+                    
+                    # Apply consensus to confidence
+                    if consensus.confidence > 0.7:
+                        new_conf *= (0.9 + 0.2 * consensus.consensus_level)  # Boost for high consensus
+                    elif consensus.confidence < 0.3:
+                        new_conf *= 0.7  # Reduce for low consensus
+                    
+                    # Store consensus in metadata
+                    idea.meta['cross_agent'] = {
+                        'decision': consensus.decision,
+                        'confidence': consensus.confidence,
+                        'consensus_level': consensus.consensus_level,
+                        'reasoning': consensus.reasoning[:200]  # Truncate for storage
+                    }
+                    
+                    logger.info(
+                        "Cross-Agent: %s | Consensus: %.2f | Confidence: %.2f",
+                        consensus.decision,
+                        consensus.consensus_level,
+                        consensus.confidence
+                    )
+                    
+                except Exception as e:
+                    logger.error("Cross-agent reasoning failed: %s", str(e))
+                
+                # LLM-powered trade analysis (with security gatekeeper)
+                try:
+                    # Prepare context for LLM analysis
+                    llm_context = {
+                        'symbol': symbol,
+                        'price': price,
+                        'direction': idea_dir,
+                        'confidence': new_conf,
+                        'regime': used_regime,
+                        'ai_consensus': np.mean(list(raw_signals.values())) if raw_signals else 0.0,
+                        'edge': edge_kelly,
+                        'risk_reward': abs((float(idea.takeprofit) - price) / (price - float(idea.stop))) if idea.stop else 0
+                    }
+                    
+                    # Request LLM analysis through gatekeeper
+                    llm_prompt = f"Analyze trade setup for {symbol}: {idea_dir} at {price:.5f} in {used_regime} regime"
+                    
+                    llm_response = await self.llm_gatekeeper.process_request(
+                        prompt=llm_prompt,
+                        purpose='analysis',
+                        context=llm_context,
+                        user_id='auto_trader'
+                    )
+                    
+                    # Adjust confidence based on LLM analysis quality
+                    if not llm_response.filtered and llm_response.confidence > 0.7:
+                        # High-quality analysis confirms trade
+                        idea.meta['llm_analysis'] = llm_response.content[:300]
+                        logger.info("LLM Analysis: %s", llm_response.content[:100])
+                    elif llm_response.threats_detected:
+                        # Security threats detected, be cautious
+                        new_conf *= 0.9
+                        logger.warning("LLM threats detected: %d", len(llm_response.threats_detected))
+                        
+                except Exception as e:
+                    logger.error("LLM analysis failed: %s", str(e))
+
                 # Ensure confidence stays within valid bounds
                 idea.confidence = max(0.0, min(1.0, new_conf))
 
@@ -512,6 +734,12 @@ class AutoTrader:
             float(getattr(idea, "stop", 0.0) or 0.0),
             float(getattr(idea, "takeprofit", 0.0) or 0.0),
         )
+        # Count viable signals and notify
+        self.signals_today += 1
+        try:
+            await self._broadcast_status()
+        except Exception:
+            pass
 
         # Bias computation for risk/throttle
         bias_engine = BiasEngine()
@@ -621,6 +849,26 @@ class AutoTrader:
                 self.threshold,
             )
             return
+        
+        # Record trade attempt in neural journal
+        trade_id = f"{symbol}_{int(time.time())}"
+        await self.neural_journal.record_trade(
+            trade_id=trade_id,
+            symbol=symbol,
+            direction=getattr(idea, 'bias', 'bullish'),
+            entry_price=float(getattr(idea, 'entry', price)),
+            confidence=float(getattr(idea, 'confidence', 0.0)),
+            features={
+                'regime': used_regime,
+                'ai_consensus': np.mean(list(raw_signals.values())) if raw_signals else 0.0,
+                'volatility': float(market_feats.get('volatility', 0.0)),
+                'execution_edge': float(market_feats.get('execution_edge', 0.0)),
+                'flow_toxicity': float(market_feats.get('flow_toxicity', 0.0)),
+                'kelly_edge': edge_kelly
+            }
+        )
+        
+        # Execute if threshold reached
 
         # Currency bucket exposure check (simple per-currency cap)
         try:
@@ -648,6 +896,11 @@ class AutoTrader:
                 placed,
                 self.dry_run,
             )
+            self.executed_today += 1
+            try:
+                await self._broadcast_status()
+            except Exception:
+                pass
 
     # -------------------- Helpers: currency exposure --------------------
     def _parse_fx(self, symbol: str) -> Tuple[str, str]:
@@ -855,7 +1108,52 @@ class AutoTrader:
             logger.exception("Order placement failed")
             return False
 
+    async def apply_tuning(
+        self,
+        *,
+        interval_sec: Optional[int] = None,
+        threshold: Optional[float] = None,
+        atr_period: Optional[int] = None,
+        atr_sl_mult: Optional[float] = None,
+        atr_tp_mult: Optional[float] = None,
+        cooldown_sec: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Apply bounded runtime tuning updates. Returns dict of changes applied."""
+        changes: Dict[str, Any] = {}
+        async with self._param_lock:
+            if interval_sec is not None and interval_sec != self.interval_sec:
+                self.interval_sec = int(interval_sec)
+                changes["interval_sec"] = self.interval_sec
+            if threshold is not None and threshold != self.threshold:
+                self.threshold = float(threshold)
+                changes["threshold"] = self.threshold
+            if atr_period is not None and atr_period != self.atr_period:
+                self.atr_period = int(atr_period)
+                changes["atr_period"] = self.atr_period
+            if atr_sl_mult is not None and atr_sl_mult != self.atr_sl_mult:
+                self.atr_sl_mult = float(atr_sl_mult)
+                changes["atr_sl_mult"] = self.atr_sl_mult
+            if atr_tp_mult is not None and atr_tp_mult != self.atr_tp_mult:
+                self.atr_tp_mult = float(atr_tp_mult)
+                changes["atr_tp_mult"] = self.atr_tp_mult
+            if cooldown_sec is not None and cooldown_sec != self.cooldown_sec:
+                self.cooldown_sec = int(cooldown_sec)
+                changes["cooldown_sec"] = self.cooldown_sec
+
+        if changes:
+            logger.info("AutoTrader parameters updated: %s", changes)
+        return changes
+
     def get_status(self) -> Dict[str, object]:
+        uptime = (
+            float(time.time() - self._started_at)
+            if (self._started_at is not None and self.running)
+            else 0.0
+        )
+        try:
+            ws_clients = len(self._clients)
+        except Exception:
+            ws_clients = 0
         return {
             "running": self.running,
             "symbols": self.symbols,
@@ -865,6 +1163,12 @@ class AutoTrader:
             "dry_run": self.dry_run,
             "atr_period": self.atr_period,
             "last_trade_ts": self._last_trade_ts,
+            "signals_today": self.signals_today,
+            "executed_today": self.executed_today,
+            "counters_day": self._counters_day,
+            "started_at": self._started_at,
+            "uptime_sec": uptime,
+            "ws_clients": ws_clients,
         }
 
 

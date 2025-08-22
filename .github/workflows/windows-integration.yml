@@ -1,0 +1,45 @@
+name: Windows Integration (AutoTrader)
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_integration:
+        description: 'Run Windows integration test with AutoTrader and MT5 (heavy)'
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  windows-integration:
+    if: ${{ inputs.run_integration == true }}
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Upgrade pip
+        run: |
+          python -m pip install --upgrade pip
+
+      - name: Install backend requirements (heavy)
+        run: |
+          pip install -r backend/requirements.txt
+
+      - name: Verify MetaTrader5 import
+        run: |
+          python -c "import MetaTrader5 as mt5; print('MetaTrader5 version:', getattr(mt5, '__version__', 'unknown'))"
+
+      - name: Run integration test (AutoTrader status)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          RUN_AUTOTRADER_INTEGRATION: '1'
+          ARIA_ENABLE_MT5: '1'
+        run: |
+          python -m pytest backend/tests/test_monitoring_endpoints.py -k integration -q

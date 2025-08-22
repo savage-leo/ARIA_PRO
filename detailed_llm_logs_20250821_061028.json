@@ -1,0 +1,119 @@
+{
+  "metadata": {
+    "timestamp": "2025-08-21T06:10:28.310724",
+    "test_type": "detailed_proxy_review",
+    "proxy_url": "http://localhost:11435"
+  },
+  "test_results": [
+    {
+      "timestamp": "2025-08-21T06:10:31.842157",
+      "test_name": "health_check",
+      "status": "PASS",
+      "details": {
+        "status_code": 200
+      },
+      "error": null,
+      "response_text": "{\"status\":\"ok\"}"
+    },
+    {
+      "timestamp": "2025-08-21T06:10:35.586604",
+      "test_name": "model_inventory",
+      "status": "PASS",
+      "details": {
+        "total_models": 12,
+        "local_models": 4,
+        "remote_models": 8,
+        "local_model_names": [
+          "mistral:latest",
+          "nomic-embed-text:latest",
+          "qwen2.5-coder:1.5b-base",
+          "gemma3:4b"
+        ],
+        "remote_model_names": [
+          "llama-3.1-405b",
+          "llama-3.3-70b",
+          "qwen-coder-32b",
+          "deepseek-r1-14b",
+          "qwen-vl-72b",
+          "reka-flash-3",
+          "qwq-32b",
+          "llama-3.2-3b"
+        ]
+      },
+      "error": null,
+      "response_text": "{\"models\":[{\"name\":\"mistral:latest\",\"model\":\"mistral:latest\",\"modified_at\":\"2025-08-04T02:40:33.1771705+03:00\",\"size\":4372824384,\"digest\":\"6577803aa9a036369e481d648a2baebb381ebc6e897f2bb9a766a2aa7bfbc1cf\",\"details\":{\"parent_model\":\"\",\"format\":\"gguf\",\"family\":\"llama\",\"families\":[\"llama\"],\"parameter_size\":\"7.2B\",\"quantization_level\":\"Q4_K_M\"}},{\"name\":\"nomic-embed-text:latest\",\"model\":\"nomic-embed-text:latest\",\"modified_at\":\"2025-08-03T23:43:04.624744+03:00\",\"size\":274302450,\"digest\":\"0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f\",\"details\":{\"parent_model\":\"\",\"format\":\"gguf\",\"family\":\"nomic-bert\",\"families\":[\"nomic-bert\"],\"parameter_size\":\"137M\",\"quantization_level\":\"F16\"}},{\"name\":\"qwen2.5-coder:1.5b-base\",\"model\":\"qwen2.5-coder:1.5b-base\",\"modified_at\":\"2025-08-03T23:38:36.0834196+03:00\",\"size\":986060385,\"digest\":\"02e0f2817a890a6de385d534465c04c5d0980abddc83615c09e79cee2c094446\",\"details\":{\"parent_model\":\"\",\"format\":\"gguf\",\"family\":\"qwen2\",\"families\":[\"qwen2\"],\"parameter_size\":\"1.5B\",\"quantization_level\":\"Q4_K_M\"}},{\"name\":\"gemma3:4b\",\"model\":\"gemma3:4b\",\"modified_at\":\"2025-08-03T19:18:57.6736433+03:00\",\"size\":3338801804,\"digest\":\"a2af6cc3eb7fa8be8504abaf9b04e88f17a119ec3f04a3addf55f92841195f5a\",\"details\":{\"parent_model\":\"\",\"format\":\"gguf\",\"family\":\"gemma3\",\"families\":[\"gemma3\"],\"parameter_size\":\"4.3B\",\"quantization_level\":\"Q4_K_M\"}},{\"name\":\"llama-3.1-405b\",\"model\":\"llama-3.1-405b\",\"modified_at\":\"2025-08-21T03:10:35.560612+00:00\",\"size\":0,\"digest\":\"remote-llama-3.1-405b\",\"specialty\":\"strategy, reasoning, analysis, default\",\"model_id\":\"meta-llama/llama-3.1-405b-instruct\"},{\"name\":\"llama-3.3-70b\",\"model\":\"llama-3.3-70b\",\"modified_at\":\"2025-08-21T03:10:35.564607+00:00\",\"size\":0,\"digest\":\"remote-llama-3.3-70b\",\"specialty\":\"strategy, reasoning, analysis, default\",\"model_id\":\"meta-llama/llama-3.3-70b-instruct\"},{\"name\":\"qwen-coder-32b\",\"model\":\"qwen-coder-32b\",\"modified_at\":\"2025-08-21T03:10:35.564607+00:00\",\"size\":0,\"digest\":\"remote-qwen-coder-32b\",\"specialty\":\"code, development, debugging, audit\",\"model_id\":\"qwen/qwen-2.5-coder-32b-instruct\"},{\"name\":\"deepseek-r1-14b\",\"model\":\"deepseek-r1-14b\",\"modified_at\":\"2025-08-21T03:10:35.564607+00:00\",\"size\":0,\"digest\":\"remote-deepseek-r1-14b\",\"specialty\":\"code, development, debugging, math\",\"model_id\":\"deepseek/deepseek-r1-distill-qwen-14b\"},{\"name\":\"qwen-vl-72b\",\"model\":\"qwen-vl-72b\",\"modified_at\":\"2025-08-21T03:10:35.564607+00:00\",\"size\":0,\"digest\":\"remote-qwen-vl-72b\",\"specialty\":\"vision, multimodal, analysis\",\"model_id\":\"qwen/qwen2.5-vl-72b-instruct\"},{\"name\":\"reka-flash-3\",\"model\":\"reka-flash-3\",\"modified_at\":\"2025-08-21T03:10:35.564607+00:00\",\"size\":0,\"digest\":\"remote-reka-flash-3\",\"specialty\":\"fast, efficient, default\",\"model_id\":\"rekaai/reka-flash-3:free\"},{\"name\":\"qwq-32b\",\"model\":\"qwq-32b\",\"modified_at\":\"2025-08-21T03:10:35.564607+00:00\",\"size\":0,\"digest\":\"remote-qwq-32b\",\"specialty\":\"fast, efficient, default\",\"model_id\":\"qwen/qwq-32b:free\"},{\"name\":\"llama-3.2-3b\",\"model\":\"llama-3.2-3b\",\"modified_at\":\"2025-08-21T03:10:35.564607+00:00\",\"size\":0,\"digest\":\"remote-llama-3.2-3b\",\"specialty\":\"fast, efficient, default\",\"model_id\":\"meta-llama/llama-3.2-3b-instruct\"}]}"
+    },
+    {
+      "timestamp": "2025-08-21T06:11:29.432470",
+      "test_name": "direct_local_model",
+      "status": "PASS",
+      "details": {
+        "status_code": 200
+      },
+      "error": null,
+      "response_text": "{\"model\":\"qwen2.5-coder:1.5b-base\",\"created_at\":\"2025-08-21T03:11:29.404981+00:00\",\"response\":\" that takes in two integers, A and B, and returns their product. Additionally, the function should print \\\"The product of A and B is X\\\", where X is the actual product of A and B.\\ndef multiply_and_print(a, b):\\n    product = a * b\\n    print(f\\\"The product of {a} and {b} is {product}\\\")\\n    return product\",\"done\":true}"
+    },
+    {
+      "timestamp": "2025-08-21T06:11:42.786731",
+      "test_name": "task_routing_code",
+      "status": "FAIL",
+      "details": {
+        "status_code": 401,
+        "task": "code",
+        "prompt": "Write a function to sort a list"
+      },
+      "error": null,
+      "response_text": "{\"detail\":\"Invalid API key provided. You can find your API key at https://api.together.ai/settings/api-keys.\"}"
+    },
+    {
+      "timestamp": "2025-08-21T06:11:50.570215",
+      "test_name": "task_routing_strategy",
+      "status": "FAIL",
+      "details": {
+        "status_code": 401,
+        "task": "strategy",
+        "prompt": "Give me a simple plan"
+      },
+      "error": null,
+      "response_text": "{\"detail\":\"Invalid API key provided. You can find your API key at https://api.together.ai/settings/api-keys.\"}"
+    },
+    {
+      "timestamp": "2025-08-21T06:11:56.118205",
+      "test_name": "task_routing_fast",
+      "status": "FAIL",
+      "details": {
+        "status_code": 401,
+        "task": "fast",
+        "prompt": "Quick answer please"
+      },
+      "error": null,
+      "response_text": "{\"detail\":\"Invalid API key provided. You can find your API key at https://api.together.ai/settings/api-keys.\"}"
+    },
+    {
+      "timestamp": "2025-08-21T06:12:01.967177",
+      "test_name": "chat_interface",
+      "status": "FAIL",
+      "details": {
+        "status_code": 401
+      },
+      "error": null,
+      "response_text": "{\"detail\":\"Invalid API key provided. You can find your API key at https://api.together.ai/settings/api-keys.\"}"
+    },
+    {
+      "timestamp": "2025-08-21T06:13:02.008259",
+      "test_name": "ollama_direct",
+      "status": "ERROR",
+      "details": {},
+      "error": "",
+      "response_text": null
+    }
+  ],
+  "summary": {
+    "total_tests": 8,
+    "passed": 3,
+    "failed": 4,
+    "errors": 1,
+    "success_rate": "37.5%",
+    "deployment_status": "READY"
+  }
+}

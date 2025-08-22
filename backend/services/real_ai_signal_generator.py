@@ -10,8 +10,11 @@ import numpy as np
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
-# Import the real model loader
-from backend.core.model_loader import aria_models
+# Import the cached model loader for 10x speedup
+from backend.core.model_loader import cached_models, ModelLoader
+from backend.core.parallel_inference import get_parallel_engine
+from backend.core.neural_trade_journal import get_neural_journal
+from backend.core.microstructure_alpha import get_microstructure_alpha
 from backend.services.ws_broadcaster import broadcast_signal
 from backend.services.mt5_market_data import mt5_market_feed
 from backend.smc.smc_fusion_core import (
@@ -21,6 +24,7 @@ from backend.smc.smc_fusion_core import (
 from backend.services.feedback_service import feedback_service
 from backend.smc.trap_detector import detect_trap
 from backend.core.config import get_settings
+from backend.core.performance_monitor import track_performance
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +39,11 @@ class RealAISignalGenerator:
         self.enhanced_engines = {}
         self.last_analysis_time = {}
 
-        # Real AI models are auto-loaded by aria_models
-        logger.info("Real AI models initialized via aria_models")
+        # Initialize parallel inference engine for 50ms latency
+        self.parallel_engine = get_parallel_engine()
+        self.neural_journal = get_neural_journal()
+        self.microstructure_alpha = get_microstructure_alpha()
+        logger.info("Parallel inference engine initialized for 50ms latency")
 
         # Initialize enhanced SMC engines for each symbol
         for symbol in self.symbols:
@@ -47,6 +54,7 @@ class RealAISignalGenerator:
             # Register with feedback service
             feedback_service.register_engine(symbol, enhanced_engine)
 
+    @track_performance("RealAISignalGenerator.start")
     async def start(self):
         """Start the real AI signal generator"""
         if self.running:
@@ -62,11 +70,13 @@ class RealAISignalGenerator:
             logger.error(f"Error in real AI signal generator: {e}")
             self.running = False
 
+    @track_performance("RealAISignalGenerator.stop")
     async def stop(self):
         """Stop the real AI signal generator"""
         self.running = False
         logger.info("Stopping real AI signal generator...")
 
+    @track_performance("RealAISignalGenerator._run_generator")
     async def _run_generator(self):
         """Main generator loop"""
         while self.running:
@@ -82,6 +92,7 @@ class RealAISignalGenerator:
                 logger.error(f"Error in real AI signal generator loop: {e}")
                 await asyncio.sleep(60)
 
+    @track_performance("RealAISignalGenerator._analyze_symbol")
     async def _analyze_symbol(self, symbol: str):
         """Analyze a single symbol and generate signals"""
         try:
@@ -112,8 +123,8 @@ class RealAISignalGenerator:
                     }
                 )
 
-            # Generate AI model signals
-            raw_signals = self._generate_ai_signals(symbol, formatted_bars)
+            # Generate AI model signals in parallel (50ms latency)
+            raw_signals = await self._generate_ai_signals_parallel(symbol, formatted_bars)
 
             # Build market features
             market_feats = await self._build_market_features(symbol, formatted_bars)
@@ -146,10 +157,75 @@ class RealAISignalGenerator:
             # Send alert for any other errors
             await self._send_mt5_alert(f"Error analyzing {symbol}: {str(e)}")
 
+    @track_performance("RealAISignalGenerator._generate_ai_signals_parallel")
+    async def _generate_ai_signals_parallel(
+        self, symbol: str, bars: List[Dict]
+    ) -> Dict[str, float]:
+        """Generate AI model signals using parallel inference (50ms latency)"""
+        if len(bars) < 5:
+            return {
+                "lstm": 0.0,
+                "cnn": 0.0,
+                "ppo": 0.0,
+                "vision": 0.0,
+                "llm_macro": 0.0,
+                "xgb": 0.0,
+            }
+
+        try:
+            # Prepare features for parallel inference
+            features = {'bars': bars}
+            
+            # Run all models in parallel (50ms total latency)
+            inference_results = await self.parallel_engine.infer_all(features)
+            
+            # Extract microstructure alpha signals
+            micro_signals = await self.microstructure_alpha.extract_alpha(symbol)
+            
+            # Convert results to signal dict
+            signals = {}
+            for model_name, result in inference_results.items():
+                if result.error:
+                    logger.warning(f"Model {model_name} error: {result.error}")
+                    signals[model_name] = 0.0
+                else:
+                    # Apply microstructure edge to model scores
+                    edge_multiplier = 1.0 + (micro_signals.execution_edge * 0.1)
+                    signals[model_name] = result.score * edge_multiplier
+                    
+            # Ensure all expected signals are present
+            for key in ["lstm", "cnn", "ppo", "xgboost", "visual_ai", "llm_macro"]:
+                if key not in signals:
+                    signals[key] = 0.0
+                    
+            # Map visual_ai -> vision, xgboost -> xgb for compatibility
+            signals["vision"] = signals.pop("visual_ai", 0.0)
+            signals["xgb"] = signals.pop("xgboost", 0.0)
+            
+            # Log latency stats
+            latency_stats = self.parallel_engine.get_latency_stats()
+            if latency_stats:
+                avg_latency = np.mean([s['mean_ms'] for s in latency_stats.values()])
+                logger.debug(f"Parallel inference avg latency: {avg_latency:.1f}ms")
+            
+            return signals
+
+        except Exception as e:
+            logger.error(f"Error in parallel signal generation: {e}")
+            return {
+                "lstm": 0.0,
+                "cnn": 0.0,
+                "ppo": 0.0,
+                "vision": 0.0,
+                "llm_macro": 0.0,
+                "xgb": 0.0,
+            }
+            
+    @track_performance("RealAISignalGenerator._generate_ai_signals")
     def _generate_ai_signals(
         self, symbol: str, bars: List[Dict]
     ) -> Dict[str, float]:
-        """Generate AI model signals using REAL models"""
+        """Legacy synchronous signal generation (fallback)"""
         if len(bars) < 5:
             return {
                 "lstm": 0.0,
@@ -164,45 +240,36 @@ class RealAISignalGenerator:
             signals = {}
             include_xgb = get_settings().include_xgb
 
-            # LSTM signal - real sequence prediction
-            if len(bars) >= 50:
-                prices = np.array([bar["c"] for bar in bars[-50:]])
-                lstm_pred = aria_models.predict_lstm(prices)
-                signals["lstm"] = lstm_pred if lstm_pred is not None else 0.0
-            else:
-                signals["lstm"] = 0.0
+            # LSTM signal - cached sequence prediction
+            seq = np.array([bar["c"] for bar in bars[-50:]])
+            lstm_signal = cached_models.predict_lstm(seq)
+            signals["lstm"] = lstm_signal if lstm_signal is not None else 0.0
 
-            # XGB signal - ONNX adapter over close series
-            if include_xgb:
-                closes = [bar["c"] for bar in bars]
-                try:
-                    xgb_pred = aria_models.predict_xgb({"series": closes})
-                except Exception:
-                    xgb_pred = None
-                signals["xgb"] = xgb_pred if xgb_pred is not None else 0.0
-            else:
-                signals["xgb"] = 0.0
+            # CNN signal - cached pattern recognition
+            chart_image = self._create_chart_tensor(bars)
+            cnn_signal = cached_models.predict_cnn(chart_image)
+            signals["cnn"] = cnn_signal if cnn_signal is not None else 0.0
 
-            # CNN signal - real pattern detection
-            chart_image = self._generate_chart_image(bars)
-            cnn_pred = aria_models.predict_cnn(chart_image)
-            signals["cnn"] = cnn_pred if cnn_pred is not None else 0.0
+            # PPO signal - cached trading decision
+            obs = self._create_ppo_observation(bars)
+            ppo_signal = cached_models.trade_with_ppo(obs)
+            signals["ppo"] = ppo_signal if ppo_signal is not None else 0.0
 
-            # PPO signal - real trading agent
-            state_vector = self._build_state_vector(bars)
-            ppo_action = aria_models.trade_with_ppo(state_vector)
-            signals["ppo"] = ppo_action if ppo_action is not None else 0.0
+            # XGBoost signal - cached tabular prediction
+            xgb_features = self._extract_xgb_features(bars)
+            xgb_signal = cached_models.predict_xgb(xgb_features)
+            signals["xgb"] = xgb_signal if xgb_signal is not None else 0.0
 
-            # Visual AI signal - real feature extraction
-            latent_features = aria_models.predict_visual(chart_image)
+            # Visual AI signal - cached feature extraction
+            latent_features = cached_models.predict_visual(chart_image)
             if latent_features is not None:
                 signals["vision"] = float(np.tanh(np.mean(latent_features)))
             else:
                 signals["vision"] = 0.0
 
-            # LLM Macro signal - real text analysis
+            # LLM Macro signal - cached text analysis
             macro_context = self._get_macro_context(symbol)
-            llm_response = aria_models.query_llm(macro_context)
+            llm_response = cached_models.query_llm(macro_context)
             if llm_response:
                 # Simple sentiment analysis of LLM response
                 bullish_words = ["bullish", "positive", "growth", "strength", "up"]
@@ -231,6 +298,7 @@ class RealAISignalGenerator:
                 "xgb": 0.0,
             }
 
+    @track_performance("RealAISignalGenerator.get_signals")
     def get_signals(self, symbol: str, features: Dict[str, Any]) -> Dict[str, float]:
         """
         On-demand synchronous signal generation using live MT5 market data.
@@ -379,6 +447,7 @@ class RealAISignalGenerator:
         ]
         return np.mean(recent_changes) if recent_changes else 0.0
 
+    @track_performance("RealAISignalGenerator._build_market_features")
     async def _build_market_features(
         self, symbol: str, bars: List[Dict]
     ) -> Dict[str, float]:
@@ -708,6 +777,7 @@ class RealAISignalGenerator:
         # Normalize slope to 0-1 range
         return min(max(abs(slope) * 1000, 0.0), 1.0)
 
+    @track_performance("RealAISignalGenerator._generate_signals_from_analysis")
     async def _generate_signals_from_analysis(
         self, symbol: str, smc_idea, trap_result: Dict, bars: List[Dict]
     ) -> List[Dict]:
@@ -771,6 +841,7 @@ class RealAISignalGenerator:
 
         return signals
 
+    @track_performance("RealAISignalGenerator._generate_technical_signal")
     def _generate_technical_signal(
         self, symbol: str, bars: List[Dict]
     ) -> Optional[Dict]:
@@ -885,6 +956,7 @@ class RealAISignalGenerator:
 
         return None
 
+    @track_performance("RealAISignalGenerator._generate_momentum_signal")
     def _generate_momentum_signal(
         self, symbol: str, bars: List[Dict]
     ) -> Optional[Dict]:
@@ -917,6 +989,7 @@ class RealAISignalGenerator:
 
         return None
 
+    @track_performance("RealAISignalGenerator._send_mt5_alert")
     async def _send_mt5_alert(self, message: str):
         """Send alert for MT5 connection issues or data problems"""
         try:

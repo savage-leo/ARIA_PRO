@@ -461,35 +461,118 @@ an accidental paste causing indentation errors. We restore the intended order: d
 the global `aria_models` and load models on import. The stray duplicated logic is removed.
 """
 
-# Global ARIA model instance
+# Import cached models and hot-swap manager
+from backend.core.model_cache import cached_aria_models
+from backend.core.hot_swap_manager import (
+    HotSwapManager, 
+    validate_onnx_model, 
+    validate_ppo_model, 
+    validate_llm_model
+)
+
+# Global ARIA model instance (legacy)
 aria_models = ARIAModels()
 
+# Global cached model instance (new)
+cached_models = cached_aria_models
 
-# Compatibility wrapper expected by TrainingConnector
+# Initialize hot-swap manager
+hot_swap_manager = HotSwapManager(
+    model_cache=cached_models.cache,
+    models_dir=MODELS_DIR
+)
+
+# Register validators
+hot_swap_manager.register_validator("lstm", validate_onnx_model)
+hot_swap_manager.register_validator("cnn", validate_onnx_model)
+hot_swap_manager.register_validator("xgb", validate_onnx_model)
+hot_swap_manager.register_validator("visual", validate_onnx_model)
+hot_swap_manager.register_validator("ppo", validate_ppo_model)
+hot_swap_manager.register_validator("llm", validate_llm_model)
+
+# Auto hot-swapping disabled by default - enable on demand if needed
+# hot_swap_manager.enable_auto_swap()
+
+
+# Enhanced compatibility wrapper
 class ModelLoader:
-    """Lightweight wrapper around global aria_models for compatibility."""
+    """Enhanced wrapper with caching and hot-swapping capabilities."""
 
-    def __init__(self):
-        # Ensure models are loaded once
-        try:
-            if not getattr(aria_models, "models_loaded", False):
-                aria_models.load_all()
-        except Exception:
-            # Best-effort; do not block import
-            pass
-        self.models = aria_models
+    def __init__(self, use_cache: bool = True):
+        self.use_cache = use_cache
+        
+        if use_cache:
+            self.models = cached_models
+        else:
+            # Fallback to legacy models
+            try:
+                if not getattr(aria_models, "models_loaded", False):
+                    aria_models.load_all()
+            except Exception:
+                pass
+            self.models = aria_models
 
     def get_model_status(self):
-        return self.models.get_model_status()
+        if self.use_cache:
+            return {
+                "lstm": self.models.cache.get_model("lstm_forex") is not None,
+                "cnn": self.models.cache.get_model("cnn_patterns") is not None,
+                "visual_ai": self.models.cache.get_model("visual_ai") is not None,
+                "ppo": self.models.cache.get_model("ppo_trader") is not None,
+                "llm_macro": self.models.cache.get_model("llm_macro") is not None,
+                "xgb": self.models.cache.get_model("xgb_forex") is not None,
+                "models_loaded": True,
+                "cache_enabled": True
+            }
+        else:
+            return self.models.get_model_status()
 
     def is_ready(self) -> bool:
-        return self.models.is_ready()
+        if self.use_cache:
+            return any([
+                self.models.cache.get_model("lstm_forex") is not None,
+                self.models.cache.get_model("cnn_patterns") is not None,
+                self.models.cache.get_model("visual_ai") is not None,
+                self.models.cache.get_model("ppo_trader") is not None,
+                self.models.cache.get_model("llm_macro") is not None,
+                self.models.cache.get_model("xgb_forex") is not None,
+            ])
+        else:
+            return self.models.is_ready()
+    
+    def get_cache_stats(self):
+        """Get cache performance statistics"""
+        if self.use_cache:
+            return self.models.get_cache_stats()
+        return {}
+    
+    def hot_swap_model(self, model_key: str, new_model_path: str) -> bool:
+        """Perform hot-swap of model"""
+        return hot_swap_manager.hot_swap_model(model_key, new_model_path)
+    
+    def get_swap_status(self):
+        """Get hot-swap status"""
+        return hot_swap_manager.get_swap_status()
+    
+    def cleanup_cache(self):
+        """Clean up expired cache entries"""
+        if self.use_cache:
+            self.models.cleanup_expired()
+        hot_swap_manager.cleanup_old_backups()
 
 
 # Auto-load models on import
 if __name__ == "__main__":
+    # Test both systems
+    print("Testing legacy models...")
     aria_models.load_all()
-    print("Model status:", aria_models.get_model_status())
+    print("Legacy model status:", aria_models.get_model_status())
+    
+    print("\nTesting cached models...")
+    print("Cache stats:", cached_models.get_cache_stats())
+    
+    print("\nTesting hot-swap manager...")
+    print("Swap status:", hot_swap_manager.get_swap_status())
 else:
-    # Defer loading on import; wrapper or explicit calls will load as needed
+    # Production: use cached models by default
     pass

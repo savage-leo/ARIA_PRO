@@ -12,6 +12,7 @@ import numpy as np
 from collections import deque
 import json
 import aiohttp
+from backend.core.performance_monitor import track_performance
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ class NewsTradingSystem:
         self.volatility_baseline = {}
         self.spike_detector = SpikeDetector()
         
+    @track_performance("NewsTradingSystem.load_news_calendar")
     async def load_news_calendar(self):
         """Load economic calendar for upcoming events"""
         # In production, would fetch from ForexFactory or economic calendar API
@@ -88,6 +90,7 @@ class NewsTradingSystem:
             ]
         }
         
+    @track_performance("NewsTradingSystem.detect_news_opportunity")
     async def detect_news_opportunity(self, symbol: str, market_data: Dict) -> Optional[Dict]:
         """Detect news trading opportunity"""
         
@@ -113,6 +116,7 @@ class NewsTradingSystem:
         
         return None
     
+    @track_performance("NewsTradingSystem._prepare_news_trade")
     async def _prepare_news_trade(self, symbol: str, event: Dict, market_data: Dict) -> Dict:
         """Prepare straddle orders before news"""
         
@@ -133,6 +137,7 @@ class NewsTradingSystem:
             'cancel_after': 300  # Cancel if not triggered in 5 minutes
         }
     
+    @track_performance("NewsTradingSystem._trade_news_spike")
     async def _trade_news_spike(self, symbol: str, event: Dict, market_data: Dict) -> Dict:
         """Trade the immediate spike after news release"""
         
@@ -169,6 +174,7 @@ class NewsTradingSystem:
         
         return None
     
+    @track_performance("NewsTradingSystem._trade_volatility_spike")
     async def _trade_volatility_spike(self, symbol: str, spike: Dict, market_data: Dict) -> Dict:
         """Trade unexpected volatility spikes"""
         
@@ -183,6 +189,7 @@ class NewsTradingSystem:
             'hold_time': 180  # 3 minutes
         }
     
+    @track_performance("NewsTradingSystem.execute_news_trade")
     async def execute_news_trade(self, opportunity: Dict, symbol: str) -> Dict:
         """Execute news-based trade"""
         
@@ -226,6 +233,7 @@ class SpikeDetector:
         self.volume_history = {}
         self.spike_threshold = 2.5  # Standard deviations
         
+    @track_performance("SpikeDetector.detect_spike")
     async def detect_spike(self, symbol: str, market_data: Dict) -> Optional[Dict]:
         """Detect price or volume spikes"""
         
@@ -285,6 +293,7 @@ class NewsImpactAnalyzer:
         self.impact_history = {}
         self.event_patterns = {}
         
+    @track_performance("NewsImpactAnalyzer.analyze_event_impact")
     def analyze_event_impact(self, event_type: str, symbol: str) -> Dict:
         """Analyze historical impact of specific news event"""
         
@@ -302,6 +311,7 @@ class NewsImpactAnalyzer:
         return typical_impacts.get(event_type, 
                                   {'avg_move': 15, 'duration': 300, 'win_rate': 0.55})
     
+    @track_performance("NewsImpactAnalyzer.predict_direction")
     def predict_direction(self, event: Dict, market_data: Dict) -> str:
         """Predict likely direction based on forecast vs actual"""
         

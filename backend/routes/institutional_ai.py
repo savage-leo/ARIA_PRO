@@ -4,9 +4,13 @@ from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime, timedelta
 import json
+import asyncio
+import os
+from fastapi import WebSocket, WebSocketDisconnect
 from backend.services.real_ai_signal_generator import real_ai_signal_generator
 from backend.services.mt5_executor import mt5_executor
 from backend.services.risk_engine import risk_engine
+from backend.services.auto_trader import auto_trader
 
 router = APIRouter(prefix="/api/institutional-ai", tags=["Institutional AI"])
 logger = logging.getLogger(__name__)
@@ -227,14 +231,26 @@ async def execute_signal(request: SignalExecutionRequest):
 async def toggle_auto_trading(request: AutoTradingToggleRequest):
     """Toggle auto trading on/off"""
     try:
-        # This would typically update a configuration setting
-        # For now, we'll just return the requested state
-        logger.info(f"Auto trading {'enabled' if request.enabled else 'disabled'}")
+        if request.enabled:
+            # Start AutoTrader asynchronously if not already running
+            if not auto_trader.running:
+                asyncio.create_task(auto_trader.start())
+            os.environ["AUTO_TRADE_ENABLED"] = "1"
+            message = "Auto trading enabled"
+        else:
+            # Stop AutoTrader gracefully if running
+            if auto_trader.running:
+                await auto_trader.stop()
+            os.environ["AUTO_TRADE_ENABLED"] = "0"
+            message = "Auto trading disabled"
 
+        status = auto_trader.get_status()
+        logger.info(message)
         return {
             "success": True,
-            "auto_trading_enabled": request.enabled,
-            "message": f"Auto trading {'enabled' if request.enabled else 'disabled'}",
+            "auto_trading_enabled": bool(status.get("running", False)),
+            "status": status,
+            "message": message,
         }
 
     except Exception as e:
@@ -246,12 +262,25 @@ async def toggle_auto_trading(request: AutoTradingToggleRequest):
 async def get_auto_trading_status():
     """Get current auto trading status"""
     try:
-        # In a real implementation, this would check the actual auto trading state
+        status = auto_trader.get_status()
+        # Derive optional compatibility fields
+        last_signal_time: Optional[str] = None
+        try:
+            last_ts_map = status.get("last_trade_ts") or {}
+            if isinstance(last_ts_map, dict) and last_ts_map:
+                last_ts = max(float(v) for v in last_ts_map.values() if v)
+                if last_ts:
+                    last_signal_time = datetime.fromtimestamp(last_ts).isoformat()
+        except Exception:
+            last_signal_time = None
+
         return {
-            "auto_trading_enabled": True,  # Default enabled since we disabled dry run
-            "last_signal_time": datetime.now().isoformat(),
-            "signals_today": 15,
-            "executed_today": 8,
+            "auto_trading_enabled": bool(status.get("running", False)),
+            "status": status,
+            # Backward-compatible fields (best-effort)
+            "last_signal_time": last_signal_time,
+            "signals_today": int(status.get("signals_today", 0)),
+            "executed_today": int(status.get("executed_today", 0)),
         }
 
     except Exception as e:
@@ -291,3 +320,21 @@ async def get_risk_overview():
     except Exception as e:
         logger.error(f"Error getting risk overview: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.websocket("/ws/auto-trader")
+async def auto_trader_ws(websocket: WebSocket):
+    """WebSocket for real-time AutoTrader status updates."""
+    try:
+        await auto_trader.register_client(websocket)
+        # Keep the connection alive and consume incoming messages (if any)
+        while True:
+            # We ignore content; receive to detect disconnects
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        # Client disconnected
+        pass
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+    finally:
+        auto_trader.unregister_client(websocket)

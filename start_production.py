@@ -44,7 +44,14 @@ def load_environment():
 
 def check_dependencies():
     """Check if all required dependencies are available"""
-    required_modules = ["fastapi", "uvicorn", "numpy", "MetaTrader5"]
+    required_modules = [
+        "fastapi",
+        "uvicorn",
+        "numpy",
+        "MetaTrader5",
+        "sklearn",  # scikit-learn runtime import path
+        "joblib",
+    ]
 
     missing = []
     for module in required_modules:

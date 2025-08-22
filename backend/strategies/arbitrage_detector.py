@@ -11,6 +11,7 @@ import numpy as np
 from collections import deque
 from datetime import datetime, timedelta
 import json
+from backend.core.performance_monitor import track_performance
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class ArbitrageDetector:
         self.cointegration_window = 100
         self.zscore_threshold = 2.0
         
+    @track_performance("ArbitrageDetector.add_price_feed")
     async def add_price_feed(self, feed_name: str, symbol: str, price_data: Dict):
         """Add price from a specific feed"""
         if symbol not in self.price_feeds:
@@ -59,6 +61,7 @@ class ArbitrageDetector:
             latency = (timestamp - price_data['server_time']) * 1000
             self.latency_map[feed_name] = latency
     
+    @track_performance("ArbitrageDetector.detect_triangular_arbitrage")
     async def detect_triangular_arbitrage(self, symbols: List[str]) -> Optional[Dict]:
         """
         Detect triangular arbitrage opportunities
@@ -115,6 +118,7 @@ class ArbitrageDetector:
             
         return None
     
+    @track_performance("ArbitrageDetector.detect_latency_arbitrage")
     async def detect_latency_arbitrage(self, symbol: str) -> Optional[Dict]:
         """
         Detect latency arbitrage between different feeds
@@ -164,6 +168,7 @@ class ArbitrageDetector:
         
         return None
     
+    @track_performance("ArbitrageDetector.detect_statistical_arbitrage")
     async def detect_statistical_arbitrage(self, symbol_pair: Tuple[str, str]) -> Optional[Dict]:
         """
         Detect statistical arbitrage (pairs trading) opportunities
@@ -203,6 +208,7 @@ class ArbitrageDetector:
         
         return None
     
+    @track_performance("ArbitrageDetector.detect_cross_broker_arbitrage")
     async def detect_cross_broker_arbitrage(self, symbol: str) -> Optional[Dict]:
         """
         Detect arbitrage between different brokers
@@ -267,6 +273,7 @@ class ArbitrageDetector:
             'timestamp': time.time()
         }
     
+    @track_performance("ArbitrageDetector.execute_arbitrage")
     async def execute_arbitrage(self, opportunity: Dict) -> Dict:
         """
         Execute arbitrage trade

@@ -1,0 +1,674 @@
+{
+  "timestamp": "2025-08-22T03:02:20.969606",
+  "repo_root": "C:\\savage\\ARIA_PRO",
+  "ast_errors": [],
+  "compile_results": {
+    "success": true,
+    "errors": []
+  },
+  "import_results": [
+    {
+      "module": "backend",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.automation.cicd_pipeline",
+      "status": "RUNTIME_ERROR",
+      "error": "'Observer' object has no attribute 'schedule'",
+      "traceback": "Traceback (most recent call last):\n  File \"c:\\savage\\ARIA_PRO\\tools\\aria_preflight.py\", line 408, in import_check\n    importlib.import_module(mod)\n  File \"C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\importlib\\__init__.py\", line 126, in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen importlib._bootstrap>\", line 1204, in _gcd_import\n  File \"<frozen importlib._bootstrap>\", line 1176, in _find_and_load\n  File \"<frozen importlib._bootstrap>\", line 1147, in _find_and_load_unlocked\n  File \"<frozen importlib._bootstrap>\", line 690, in _load_unlocked\n  File \"<frozen importlib._bootstrap_external>\", line 940, in exec_module\n  File \"<frozen importlib._bootstrap>\", line 241, in _call_with_frames_removed\n  File \"C:\\savage\\ARIA_PRO\\backend\\automation\\cicd_pipeline.py\", line 22, in <module>\n    from backend.core.model_loader import cached_models\n  File \"C:\\savage\\ARIA_PRO\\backend\\core\\model_loader.py\", line 494, in <module>\n    hot_swap_manager.enable_auto_swap()\n  File \"C:\\savage\\ARIA_PRO\\backend\\core\\hot_swap_manager.py\", line 113, in enable_auto_swap\n    self.observer.schedule(self.file_watcher, str(self.models_dir), recursive=False)\n    ^^^^^^^^^^^^^^^^^^^^^^\nAttributeError: 'Observer' object has no attribute 'schedule'\n",
+      "severity": "CRITICAL"
+    },
+    {
+      "module": "backend.compat.optional_imports",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.compat.pydantic_compat",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.connectors.mt5_wrapper",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.core.calibration",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.core.config",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.core.data_connector",
+      "status": "IMPORT_ERROR",
+      "error": "cannot import name 'is_datetime64tz_dtype' from 'pandas.api.types' (unknown location)",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.core.data_sanity",
+      "status": "IMPORT_ERROR",
+      "error": "cannot import name 'is_datetime64tz_dtype' from 'pandas.api.types' (unknown location)",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.core.fusion",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.core.hot_swap_manager",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.core.live_guard",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.core.model_cache",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.core.model_loader",
+      "status": "RUNTIME_ERROR",
+      "error": "'Observer' object has no attribute 'schedule'",
+      "traceback": "Traceback (most recent call last):\n  File \"c:\\savage\\ARIA_PRO\\tools\\aria_preflight.py\", line 408, in import_check\n    importlib.import_module(mod)\n  File \"C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\importlib\\__init__.py\", line 126, in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen importlib._bootstrap>\", line 1204, in _gcd_import\n  File \"<frozen importlib._bootstrap>\", line 1176, in _find_and_load\n  File \"<frozen importlib._bootstrap>\", line 1147, in _find_and_load_unlocked\n  File \"<frozen importlib._bootstrap>\", line 690, in _load_unlocked\n  File \"<frozen importlib._bootstrap_external>\", line 940, in exec_module\n  File \"<frozen importlib._bootstrap>\", line 241, in _call_with_frames_removed\n  File \"C:\\savage\\ARIA_PRO\\backend\\core\\model_loader.py\", line 494, in <module>\n    hot_swap_manager.enable_auto_swap()\n  File \"C:\\savage\\ARIA_PRO\\backend\\core\\hot_swap_manager.py\", line 113, in enable_auto_swap\n    self.observer.schedule(self.file_watcher, str(self.models_dir), recursive=False)\n    ^^^^^^^^^^^^^^^^^^^^^^\nAttributeError: 'Observer' object has no attribute 'schedule'\n",
+      "severity": "CRITICAL"
+    },
+    {
+      "module": "backend.core.phase3_orchestrator",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.core.regime",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.core.regime_online",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.core.risk_budget",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.core.risk_budget_enhanced",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.core.risk_engine",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.core.risk_engine_enhanced",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.core.trade_memory",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.core.training_connector",
+      "status": "IMPORT_ERROR",
+      "error": "cannot import name 'is_datetime64tz_dtype' from 'pandas.api.types' (unknown location)",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.ensemble.advanced_ensemble_optimizer",
+      "status": "RUNTIME_ERROR",
+      "error": "'Observer' object has no attribute 'schedule'",
+      "traceback": "Traceback (most recent call last):\n  File \"c:\\savage\\ARIA_PRO\\tools\\aria_preflight.py\", line 408, in import_check\n    importlib.import_module(mod)\n  File \"C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\importlib\\__init__.py\", line 126, in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen importlib._bootstrap>\", line 1204, in _gcd_import\n  File \"<frozen importlib._bootstrap>\", line 1176, in _find_and_load\n  File \"<frozen importlib._bootstrap>\", line 1147, in _find_and_load_unlocked\n  File \"<frozen importlib._bootstrap>\", line 690, in _load_unlocked\n  File \"<frozen importlib._bootstrap_external>\", line 940, in exec_module\n  File \"<frozen importlib._bootstrap>\", line 241, in _call_with_frames_removed\n  File \"C:\\savage\\ARIA_PRO\\backend\\ensemble\\advanced_ensemble_optimizer.py\", line 20, in <module>\n    from backend.core.model_loader import cached_models\n  File \"C:\\savage\\ARIA_PRO\\backend\\core\\model_loader.py\", line 494, in <module>\n    hot_swap_manager.enable_auto_swap()\n  File \"C:\\savage\\ARIA_PRO\\backend\\core\\hot_swap_manager.py\", line 113, in enable_auto_swap\n    self.observer.schedule(self.file_watcher, str(self.models_dir), recursive=False)\n    ^^^^^^^^^^^^^^^^^^^^^^\nAttributeError: 'Observer' object has no attribute 'schedule'\n",
+      "severity": "CRITICAL"
+    },
+    {
+      "module": "backend.models.extended_models",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.models.model_factory",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.monitoring.llm_monitor",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.mt5",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.production_config",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.routes.account",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.analytics",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.cicd_management",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.debug",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.hedge_fund_dashboard",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.institutional_ai",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.live_execution_api",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.market",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.model_management",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.monitoring",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.monitoring_enhanced",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.positions",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.signals",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.smc_routes",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.system_management",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.telemetry_api",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.trade_memory_api",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.trading",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.training",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.routes.websocket",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.scripts.backtest_bars",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.scripts.bench_decision_latency",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.scripts.data_pipeline_optimizer",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.scripts.inference_profiler",
+      "status": "RUNTIME_ERROR",
+      "error": "'Observer' object has no attribute 'schedule'",
+      "traceback": "Traceback (most recent call last):\n  File \"c:\\savage\\ARIA_PRO\\tools\\aria_preflight.py\", line 408, in import_check\n    importlib.import_module(mod)\n  File \"C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\importlib\\__init__.py\", line 126, in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen importlib._bootstrap>\", line 1204, in _gcd_import\n  File \"<frozen importlib._bootstrap>\", line 1176, in _find_and_load\n  File \"<frozen importlib._bootstrap>\", line 1147, in _find_and_load_unlocked\n  File \"<frozen importlib._bootstrap>\", line 690, in _load_unlocked\n  File \"<frozen importlib._bootstrap_external>\", line 940, in exec_module\n  File \"<frozen importlib._bootstrap>\", line 241, in _call_with_frames_removed\n  File \"C:\\savage\\ARIA_PRO\\backend\\scripts\\inference_profiler.py\", line 20, in <module>\n    from backend.core.model_loader import cached_models, aria_models, ModelLoader\n  File \"C:\\savage\\ARIA_PRO\\backend\\core\\model_loader.py\", line 494, in <module>\n    hot_swap_manager.enable_auto_swap()\n  File \"C:\\savage\\ARIA_PRO\\backend\\core\\hot_swap_manager.py\", line 113, in enable_auto_swap\n    self.observer.schedule(self.file_watcher, str(self.models_dir), recursive=False)\n    ^^^^^^^^^^^^^^^^^^^^^^\nAttributeError: 'Observer' object has no attribute 'schedule'\n",
+      "severity": "CRITICAL"
+    },
+    {
+      "module": "backend.scripts.sanity_check",
+      "status": "IMPORT_ERROR",
+      "error": "cannot import name 'is_datetime64tz_dtype' from 'pandas.api.types' (unknown location)",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.scripts.smoke_training",
+      "status": "IMPORT_ERROR",
+      "error": "cannot import name 'is_datetime64tz_dtype' from 'pandas.api.types' (unknown location)",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.scripts.validate_regime_pipeline",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.advanced_features",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.ai_signal_generator",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.services.alpha_vantage_client",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.aria_ollama_router",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.auto_trader",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.services.cpp_integration",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.services.cpp_integration_backup",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.data_source_manager",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.enhanced_alerting",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.ensemble_meta_learner",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.exec_arbiter",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.feedback_service",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.hedge_fund_analytics",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.institutional_proxy",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.services.lightweight_ensemble",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.market_data_feed",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.services.models_interface",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.mt5_client",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.mt5_connection_pool",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.mt5_execution_harness",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.mt5_executor",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.mt5_market_data",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.services.mt5_market_data_new",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.multi_asset_manager",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.order_executor",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.prometheus_metrics",
+      "status": "IMPORT_ERROR",
+      "error": "cannot import name 'CONTENT_TYPE_LATEST' from 'prometheus_client' (unknown location)",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.services.real_ai_signal_generator",
+      "status": "RUNTIME_ERROR",
+      "error": "'Observer' object has no attribute 'schedule'",
+      "traceback": "Traceback (most recent call last):\n  File \"c:\\savage\\ARIA_PRO\\tools\\aria_preflight.py\", line 408, in import_check\n    importlib.import_module(mod)\n  File \"C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\importlib\\__init__.py\", line 126, in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen importlib._bootstrap>\", line 1204, in _gcd_import\n  File \"<frozen importlib._bootstrap>\", line 1176, in _find_and_load\n  File \"<frozen importlib._bootstrap>\", line 1147, in _find_and_load_unlocked\n  File \"<frozen importlib._bootstrap>\", line 690, in _load_unlocked\n  File \"<frozen importlib._bootstrap_external>\", line 940, in exec_module\n  File \"<frozen importlib._bootstrap>\", line 241, in _call_with_frames_removed\n  File \"C:\\savage\\ARIA_PRO\\backend\\services\\real_ai_signal_generator.py\", line 14, in <module>\n    from backend.core.model_loader import cached_models, ModelLoader\n  File \"C:\\savage\\ARIA_PRO\\backend\\core\\model_loader.py\", line 494, in <module>\n    hot_swap_manager.enable_auto_swap()\n  File \"C:\\savage\\ARIA_PRO\\backend\\core\\hot_swap_manager.py\", line 113, in enable_auto_swap\n    self.observer.schedule(self.file_watcher, str(self.models_dir), recursive=False)\n    ^^^^^^^^^^^^^^^^^^^^^^\nAttributeError: 'Observer' object has no attribute 'schedule'\n",
+      "severity": "CRITICAL"
+    },
+    {
+      "module": "backend.services.risk_engine",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.signal_validator",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.smc_analyzer",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.services.t470_pipeline_optimized",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.telemetry_monitor",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.trading_pipeline_enhanced",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.services.ws_broadcaster",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'pydantic.version'; 'pydantic' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.smc.bias_engine",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.smc.smc_edge_core",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.smc.smc_enhancements",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.smc.smc_fusion_core",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.smc.smc_fusion_core_enhanced",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.smc.trap_detector",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.strategies.ab_testing",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.strategies.arbitrage_detector",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.strategies.news_trading",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.strategies.quick_profit_engine",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.testing.volatility_stress_tests",
+      "status": "RUNTIME_ERROR",
+      "error": "'Observer' object has no attribute 'schedule'",
+      "traceback": "Traceback (most recent call last):\n  File \"c:\\savage\\ARIA_PRO\\tools\\aria_preflight.py\", line 408, in import_check\n    importlib.import_module(mod)\n  File \"C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\importlib\\__init__.py\", line 126, in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen importlib._bootstrap>\", line 1204, in _gcd_import\n  File \"<frozen importlib._bootstrap>\", line 1176, in _find_and_load\n  File \"<frozen importlib._bootstrap>\", line 1147, in _find_and_load_unlocked\n  File \"<frozen importlib._bootstrap>\", line 690, in _load_unlocked\n  File \"<frozen importlib._bootstrap_external>\", line 940, in exec_module\n  File \"<frozen importlib._bootstrap>\", line 241, in _call_with_frames_removed\n  File \"C:\\savage\\ARIA_PRO\\backend\\testing\\volatility_stress_tests.py\", line 16, in <module>\n    from backend.core.model_loader import cached_models\n  File \"C:\\savage\\ARIA_PRO\\backend\\core\\model_loader.py\", line 494, in <module>\n    hot_swap_manager.enable_auto_swap()\n  File \"C:\\savage\\ARIA_PRO\\backend\\core\\hot_swap_manager.py\", line 113, in enable_auto_swap\n    self.observer.schedule(self.file_watcher, str(self.models_dir), recursive=False)\n    ^^^^^^^^^^^^^^^^^^^^^^\nAttributeError: 'Observer' object has no attribute 'schedule'\n",
+      "severity": "CRITICAL"
+    },
+    {
+      "module": "backend.tools.dan_audit_engine",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.training.calibrate_and_fuse",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'sklearn.isotonic'; 'sklearn' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.training.create_sample_data",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.training.download_m1_mt5",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.training.inference_to_npz",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.training.list_mt5_symbols",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.training.master_trainer",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.training.mt5_diag",
+      "status": "RUNTIME_ERROR",
+      "error": "module 'MetaTrader5' has no attribute 'last_error'",
+      "traceback": "Traceback (most recent call last):\n  File \"c:\\savage\\ARIA_PRO\\tools\\aria_preflight.py\", line 408, in import_check\n    importlib.import_module(mod)\n  File \"C:\\Users\\PC\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\importlib\\__init__.py\", line 126, in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<frozen importlib._bootstrap>\", line 1204, in _gcd_import\n  File \"<frozen importlib._bootstrap>\", line 1176, in _find_and_load\n  File \"<frozen importlib._bootstrap>\", line 1147, in _find_and_load_unlocked\n  File \"<frozen importlib._bootstrap>\", line 690, in _load_unlocked\n  File \"<frozen importlib._bootstrap_external>\", line 940, in exec_module\n  File \"<frozen importlib._bootstrap>\", line 241, in _call_with_frames_removed\n  File \"C:\\savage\\ARIA_PRO\\backend\\training\\mt5_diag.py\", line 19, in <module>\n    print(\"last_error:\", mt5.last_error())\n                         ^^^^^^^^^^^^^^\nAttributeError: module 'MetaTrader5' has no attribute 'last_error'\n",
+      "severity": "CRITICAL"
+    },
+    {
+      "module": "backend.training.prepare_m15_npz",
+      "status": "OK",
+      "severity": "INFO"
+    },
+    {
+      "module": "backend.training.train_cnn1d",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'torch.optim'; 'torch' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.training.train_lstm",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'torch.optim'; 'torch' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.training.train_ppo",
+      "status": "IMPORT_ERROR",
+      "error": "No module named 'stable_baselines3.common'; 'stable_baselines3' is not a package",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.training.train_xgb",
+      "status": "IMPORT_ERROR",
+      "error": "cannot import name 'roc_auc_score' from 'sklearn.metrics' (unknown location)",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.training.validation_utils",
+      "status": "IMPORT_ERROR",
+      "error": "cannot import name 'roc_auc_score' from 'sklearn.metrics' (unknown location)",
+      "severity": "ERROR"
+    },
+    {
+      "module": "backend.training.walk_forward_orchestrator",
+      "status": "IMPORT_ERROR",
+      "error": "cannot import name 'roc_auc_score' from 'sklearn.metrics' (unknown location)",
+      "severity": "ERROR"
+    }
+  ],
+  "pytest_results": {
+    "exit_code": 2,
+    "status": "COMPLETED"
+  },
+  "requirements_check": {
+    "files_found": [
+      "backend/requirements.txt",
+      "frontend/package.json"
+    ],
+    "missing_deps": [],
+    "warnings": []
+  },
+  "summary": {
+    "total_files": 197,
+    "syntax_errors": 0,
+    "critical_errors": 0,
+    "import_failures": 51,
+    "compile_success": true,
+    "pytest_exit_code": 2
+  }
+}

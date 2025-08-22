@@ -12,16 +12,16 @@ import {
   Tooltip,
 } from '@mui/material';
 import {
-  CheckCircle,
-  Warning,
-  Error,
-  OfflinePin,
-  Refresh,
-  Timeline,
-  Memory,
-  Speed,
-  Storage,
-} from '@mui/icons-material';
+  CheckCircleOutlined,
+  WarningOutlined,
+  CloseCircleOutlined,
+  DisconnectOutlined,
+  ReloadOutlined,
+  StockOutlined,
+  HddOutlined,
+  ThunderboltOutlined,
+  DatabaseOutlined,
+} from '@ant-design/icons';
 import { useAppDispatch, useAppSelector } from '@/store';
 import { fetchModuleStatus } from '@/store/slices/systemStatusSlice';
 
@@ -131,11 +131,11 @@ const getStatusColor = (status: string) => {
 
 const getStatusIcon = (status: string) => {
   switch (status) {
-    case 'healthy': return <CheckCircle sx={{ color: '#00ff41' }} />;
-    case 'warning': return <Warning sx={{ color: '#ffaa00' }} />;
-    case 'error': return <Error sx={{ color: '#ff0040' }} />;
-    case 'offline': return <OfflinePin sx={{ color: '#666666' }} />;
-    default: return <OfflinePin sx={{ color: '#666666' }} />;
+    case 'healthy': return <CheckCircleOutlined style={{ color: '#00ff41' }} />;
+    case 'warning': return <WarningOutlined style={{ color: '#ffaa00' }} />;
+    case 'error': return <CloseCircleOutlined style={{ color: '#ff0040' }} />;
+    case 'offline': return <DisconnectOutlined style={{ color: '#666666' }} />;
+    default: return <DisconnectOutlined style={{ color: '#666666' }} />;
   }
 };
 
@@ -220,7 +220,7 @@ export const AriaFlowMonitor: React.FC = () => {
           />
           <Tooltip title="Refresh Status">
             <IconButton onClick={handleRefresh} sx={{ color: '#00ff41' }}>
-              <Refresh />
+              <ReloadOutlined />
             </IconButton>
           </Tooltip>
         </Box>
@@ -232,7 +232,7 @@ export const AriaFlowMonitor: React.FC = () => {
           <Card sx={{ backgroundColor: '#1a1a1a', border: '1px solid #00ff41' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Timeline sx={{ color: '#00ff41' }} />
+                <StockOutlined style={{ color: '#00ff41' }} />
                 <Typography variant="h6" sx={{ color: '#00ff41' }}>
                   SYSTEM HEALTH
                 </Typography>
@@ -258,7 +258,7 @@ export const AriaFlowMonitor: React.FC = () => {
           <Card sx={{ backgroundColor: '#1a1a1a', border: '1px solid #00ff41' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Memory sx={{ color: '#00ff41' }} />
+                <HddOutlined style={{ color: '#00ff41' }} />
                 <Typography variant="h6" sx={{ color: '#00ff41' }}>
                   MEMORY USAGE
                 </Typography>
@@ -274,7 +274,7 @@ export const AriaFlowMonitor: React.FC = () => {
           <Card sx={{ backgroundColor: '#1a1a1a', border: '1px solid #00ff41' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Speed sx={{ color: '#00ff41' }} />
+                <ThunderboltOutlined style={{ color: '#00ff41' }} />
                 <Typography variant="h6" sx={{ color: '#00ff41' }}>
                   CPU USAGE
                 </Typography>
@@ -290,7 +290,7 @@ export const AriaFlowMonitor: React.FC = () => {
           <Card sx={{ backgroundColor: '#1a1a1a', border: '1px solid #00ff41' }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Storage sx={{ color: '#00ff41' }} />
+                <DatabaseOutlined style={{ color: '#00ff41' }} />
                 <Typography variant="h6" sx={{ color: '#00ff41' }}>
                   UPTIME
                 </Typography>

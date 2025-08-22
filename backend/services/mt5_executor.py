@@ -1,25 +1,33 @@
-import MetaTrader5 as mt5
-import os
-from dotenv import load_dotenv
+try:
+    import MetaTrader5 as mt5
+    MT5_AVAILABLE = True
+except Exception:
+    try:
+        # Fallback to internal stub for non-MT5 environments
+        from backend import mt5 as mt5  # type: ignore
+        MT5_AVAILABLE = False
+    except Exception:
+        mt5 = None  # type: ignore
+        MT5_AVAILABLE = False
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
 import subprocess
 import time
+import os
 from pathlib import Path
 from backend.services.mt5_connection_pool import get_connection_pool
+from backend.core.config import get_settings
 
-load_dotenv()
+settings = get_settings()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-MT5_LOGIN = (
-    int(os.getenv("MT5_LOGIN", "0")) if os.getenv("MT5_LOGIN", "").strip() else 0
-)
-MT5_PASSWORD = os.getenv("MT5_PASSWORD", "")
-MT5_SERVER = os.getenv("MT5_SERVER", "")
+MT5_LOGIN = int(settings.MT5_LOGIN) if settings.MT5_LOGIN is not None else 0
+MT5_PASSWORD = settings.MT5_PASSWORD or ""
+MT5_SERVER = settings.MT5_SERVER or ""
 
 
 class MT5Executor:

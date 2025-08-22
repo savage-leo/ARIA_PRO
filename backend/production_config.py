@@ -4,9 +4,28 @@ Centralizes all production settings and validation.
 """
 
 import os
-from typing import Optional
-from pydantic import BaseSettings, validator
 from functools import lru_cache
+
+# Pydantic v1/v2 compatibility shims
+try:
+    from pydantic_settings import BaseSettings, SettingsConfigDict  # type: ignore
+    _P2 = True
+except Exception:  # pragma: no cover
+    _P2 = False
+    SettingsConfigDict = None  # type: ignore
+    try:
+        from pydantic import BaseSettings  # type: ignore
+    except Exception:  # pragma: no cover
+        from pydantic.v1 import BaseSettings  # type: ignore
+
+# Unify validator API: v2 uses field_validator
+try:
+    from pydantic import field_validator as validator  # type: ignore
+except Exception:  # pragma: no cover
+    try:
+        from pydantic import validator  # type: ignore
+    except Exception:  # pragma: no cover
+        from pydantic.v1 import validator  # type: ignore
 
 class ProductionSettings(BaseSettings):
     """Production environment settings"""
@@ -40,8 +59,15 @@ class ProductionSettings(BaseSettings):
     # Performance
     mt5_pool_size: int = 5
     request_timeout: int = 30
-    
-    class Config:
+
+    # Pydantic v2 configuration (ignored by v1)
+    try:  # type: ignore
+        model_config = SettingsConfigDict(env_prefix="", case_sensitive=False)  # type: ignore
+    except Exception:
+        pass
+
+    # Pydantic v1 configuration (ignored by v2)
+    class Config:  # type: ignore
         env_prefix = ""
         case_sensitive = False
     

@@ -1,0 +1,67 @@
+{
+  "metadata": {
+    "timestamp": "2025-08-21T06:04:56.912608",
+    "test_type": "comprehensive_proxy_review"
+  },
+  "test_results": [
+    {
+      "timestamp": "2025-08-21T06:05:06.415366",
+      "test_name": "health_check",
+      "status": "PASS",
+      "details": {
+        "status_code": 200
+      },
+      "error": null
+    },
+    {
+      "timestamp": "2025-08-21T06:05:16.329544",
+      "test_name": "model_inventory",
+      "status": "PASS",
+      "details": {
+        "total_models": 12,
+        "local_models": 4,
+        "remote_models": 8
+      },
+      "error": null
+    },
+    {
+      "timestamp": "2025-08-21T06:06:16.820486",
+      "test_name": "local_model",
+      "status": "ERROR",
+      "details": {},
+      "error": ""
+    },
+    {
+      "timestamp": "2025-08-21T06:06:47.023671",
+      "test_name": "task_routing_code",
+      "status": "FAIL",
+      "details": {
+        "status_code": 401
+      },
+      "error": null
+    },
+    {
+      "timestamp": "2025-08-21T06:07:16.022479",
+      "test_name": "task_routing_strategy",
+      "status": "FAIL",
+      "details": {
+        "status_code": 401
+      },
+      "error": null
+    },
+    {
+      "timestamp": "2025-08-21T06:07:43.145180",
+      "test_name": "task_routing_fast",
+      "status": "FAIL",
+      "details": {
+        "status_code": 401
+      },
+      "error": null
+    }
+  ],
+  "summary": {
+    "total_tests": 6,
+    "passed": 2,
+    "success_rate": "33.3%"
+  }
+}

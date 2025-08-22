@@ -10,6 +10,7 @@ import PositionsTab from "../interfaces/PositionsTab";
 import WatchlistTab from "../interfaces/WatchlistTab";
 import SettingsTab from "../interfaces/SettingsTab";
 import { HUD } from "../../theme/hud";
+import { PerformanceDashboard } from "../performance/PerformanceDashboard";
 
 type TabDef = { route: string; label: string; element: React.ReactNode };
 
@@ -20,6 +21,7 @@ const tabs: TabDef[] = [
   { route: "/positions",               label: "Positions & Equity",     element: <PositionsTab /> },
   { route: "/watchlist",               label: "Market Watchlist",       element: <WatchlistTab /> },
   { route: "/ai-smc",                  label: "Institutional AI",      element: <InstitutionalAITab /> },
+  { route: "/performance",             label: "Performance Monitor",    element: <PerformanceDashboard /> },
   { route: "/settings",                label: "System Settings",        element: <SettingsTab /> },
 ];
 
@@ -36,7 +38,7 @@ const TabbedShell: React.FC = () => {
 
   return (
     <div className={`h-full flex flex-col ${HUD.BG}`}>
-      <Tab.Group selectedIndex={selectedIndex} onChange={(i) => {
+      <Tab.Group selectedIndex={selectedIndex} onChange={(i: number) => {
         setSelectedIndex(i);
         const route = tabs[i]?.route || "/trading";
         if (location.pathname !== route) navigate(route, { replace: true });
@@ -45,7 +47,7 @@ const TabbedShell: React.FC = () => {
           {tabs.map((t) => (
             <Tab
               key={t.route}
-              className={({ selected }) => (selected ? HUD.TAB_ACTIVE : HUD.TAB)}
+              className={({ selected }: { selected: boolean }) => (selected ? HUD.TAB_ACTIVE : HUD.TAB)}
             >
               {t.label}
             </Tab>

@@ -1,8 +1,10 @@
 fastapi
+python-multipart>=0.0.9
 uvicorn==0.30.1
 python-dotenv==1.0.1
 httpx
 pytest
+pytest-json-report>=1.5.0
 MetaTrader5==5.0.4424; platform_system == "Windows"
 pydantic
 websockets
@@ -19,3 +21,10 @@ aiohttp==3.9.5
 
 slowapi>=0.1.9
 pybreaker>=1.0.0
+prometheus-client>=0.19.0
+sqlalchemy>=1.4,<3.0
+redis>=5.0.0
+
+# ML meta-optimizer dependencies
+scikit-learn==1.5.1
+joblib>=1.3,<2

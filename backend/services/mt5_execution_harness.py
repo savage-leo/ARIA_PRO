@@ -19,6 +19,7 @@ from backend.services.t470_pipeline_optimized import t470_pipeline
 from backend.services.hedge_fund_analytics import hedge_fund_analytics
 from backend.core.risk_budget_enhanced import position_sizer
 from backend.core.regime_online import regime_manager
+from backend.services.telemetry_monitor import telemetry_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +277,33 @@ class MT5ExecutionHarness:
             # Calculate execution metrics
             latency_ms = (time.perf_counter() - start_time) * 1000
             execution_result.latency_ms = latency_ms
+
+            # Track execution with telemetry
+            if execution_result.success:
+                expected_price = (tick_data["bid"] + tick_data["ask"]) / 2
+                actual_price = execution_result.price
+                
+                trade_data = {
+                    "symbol": symbol,
+                    "action": action,
+                    "volume": volume,
+                    "pnl": 0.0,  # Will be updated when position closes
+                    "confidence": confidence,
+                    "regime": regime.get("state", "T"),
+                    "execution_price": actual_price,
+                    "expected_price": expected_price
+                }
+                
+                telemetry_monitor.track_execution(
+                    start_time=start_time,
+                    end_time=time.perf_counter(),
+                    expected_price=expected_price,
+                    actual_price=actual_price,
+                    trade_data=trade_data
+                )
+            else:
+                # Track execution error
+                telemetry_monitor.performance_monitor.track_error("execution_failed")
 
             # Update tracking
             if execution_result.success:

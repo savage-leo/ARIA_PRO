@@ -1,10 +1,8 @@
 from typing import Tuple
 import pandas as pd
-import numpy as np
 from pandas.api.types import (
     is_integer_dtype,
     is_datetime64_any_dtype,
-    is_datetime64tz_dtype,
 )
 
 
@@ -33,19 +31,23 @@ def normalize_timestamps(df: pd.DataFrame, ts_col: str = "timestamp") -> pd.Data
                 df.loc[mask_invalid, ts_col] = salvage.loc[mask_invalid]
             except Exception:
                 pass
-    elif is_datetime64tz_dtype(col):
-        # Ensure UTC
-        try:
-            df[ts_col] = col.dt.tz_convert("UTC")
-        except Exception:
-            df[ts_col] = col
     elif is_datetime64_any_dtype(col):
-        # Localize to UTC if naive
+        # If tz-aware, convert to UTC; else localize to UTC
         try:
-            df[ts_col] = col.dt.tz_localize("UTC")
-        except TypeError:
-            # Already tz-aware or mixed; fallback to parse
-            df[ts_col] = pd.to_datetime(col, utc=True, errors="coerce")
+            tz = getattr(col.dt, "tz", None)
+        except Exception:
+            tz = None
+        if tz is not None:
+            try:
+                df[ts_col] = col.dt.tz_convert("UTC")
+            except Exception:
+                df[ts_col] = col
+        else:
+            try:
+                df[ts_col] = col.dt.tz_localize("UTC")
+            except TypeError:
+                # Already tz-aware or mixed; fallback to parse
+                df[ts_col] = pd.to_datetime(col, utc=True, errors="coerce")
     else:
         df[ts_col] = pd.to_datetime(col, utc=True, errors="coerce")
 

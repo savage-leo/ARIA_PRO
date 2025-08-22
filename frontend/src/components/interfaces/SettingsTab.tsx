@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useState, useRef } from "react";
 import { HUD } from "../../theme/hud";
 // import { apiGet, apiPost } from "../../services/api";
 import BackendControlPanel from "./BackendControlPanel";
+import HotSwapAdminWidget from "./HotSwapAdminWidget";
 
 const SettingsTab: React.FC = () => {
   const [rtt] = useState<number | null>(null);
@@ -98,6 +99,11 @@ const SettingsTab: React.FC = () => {
           </div>
           <div className="text-xs text-cyan-300/60 mt-2">Last checked: {health.lastChecked || "—"}</div>
         </div>
+      </div>
+
+      {/* Hot-Swap Admin Widget */}
+      <div className="mt-4">
+        <HotSwapAdminWidget />
       </div>
 
       {/* Backend Control Panel */}

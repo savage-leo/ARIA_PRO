@@ -126,3 +126,6 @@ class RiskBudgetEngine:
             "exposure_factor": exfac,
         }
         return RiskBudgetResult(risk_units=units, throttle=False, reasons=reasons)
+
+# Compatibility alias for legacy imports
+RiskBudget = RiskBudgetEngine

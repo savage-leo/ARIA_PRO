@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest",
+        "--isolated",
+        "--headless=false",
+        "--output-dir=./mcp-logs",
+        "--port=8931",
+        "--save-trace"
+      ]
+    }
+  }
+}

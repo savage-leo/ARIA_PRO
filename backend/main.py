@@ -14,18 +14,21 @@ from backend.routes import (
     debug,
     trade_memory_api,
     analytics,
+    model_management,
 )
 from backend.routes import (
     monitoring_enhanced,
     hedge_fund_dashboard,
     live_execution_api,
     training,
+    telemetry_api,
 )
 from backend.services.data_source_manager import data_source_manager
 from backend.services.auto_trader import auto_trader
 from backend.services.mt5_market_data import mt5_market_feed
 from backend.services.cpp_integration import cpp_service
 from backend.monitoring.llm_monitor import llm_monitor_service
+from backend.core.performance_monitor import get_performance_monitor
 import asyncio
 import os
 import logging
@@ -254,7 +257,7 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With", "X-ADMIN-KEY"],
 )
 if _cors_origins:
     logger.info(f"CORS allow_origins: {_cors_origins}")
@@ -280,6 +283,13 @@ app.include_router(analytics.router)
 app.include_router(institutional_ai.router)
 app.include_router(system_management.router)
 app.include_router(training.router)
+app.include_router(telemetry_api.router)
+from backend.routes.model_management import router as model_management_router
+from backend.routes.cicd_management import router as cicd_management_router
+from backend.routes.hot_swap_admin import router as hot_swap_admin_router
+app.include_router(model_management_router)
+app.include_router(cicd_management_router)
+app.include_router(hot_swap_admin_router)
 
 # Register data sources
 # Enforce MT5-only live feed; no simulated fallback
@@ -357,6 +367,18 @@ async def startup_event():
                 logger.info("AutoTrader started")
             except Exception as e:
                 logger.error(f"Failed to start AutoTrader: {e}")
+
+        # Start Performance Monitor background tasks
+        try:
+            monitor = get_performance_monitor()
+            await monitor.start_monitoring()
+            # Ensure only a single logger task is running
+            task = getattr(app.state, "perf_log_task", None)
+            if not task or task.done():
+                app.state.perf_log_task = asyncio.create_task(monitor.log_metrics())
+                logger.info("PerformanceMonitor started (system monitor + periodic logger)")
+        except Exception as e:
+            logger.error(f"Failed to start PerformanceMonitor: {e}")
     except Exception as e:
         logger.error(f"Error starting data sources: {e}")
 
@@ -374,6 +396,14 @@ async def shutdown_event():
                 task.cancel()
         except Exception as e:
             logger.error(f"Error stopping AutoTrader: {e}")
+
+        # Stop Performance Monitor logger task
+        try:
+            ptask = getattr(app.state, "perf_log_task", None)
+            if ptask:
+                ptask.cancel()
+        except Exception as e:
+            logger.error(f"Error stopping PerformanceMonitor logger: {e}")
 
         await data_source_manager.stop_all()
         logger.info("Data sources stopped successfully")
