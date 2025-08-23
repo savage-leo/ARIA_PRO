@@ -26,7 +26,7 @@ from backend.core.cross_agent_reasoning import get_cross_agent_reasoning
 from backend.core.llm_gatekeeper import get_llm_gatekeeper
 from backend.core.performance_monitor import get_performance_monitor, track_performance
 from backend.core.microstructure_alpha import get_microstructure_alpha
-from backend.smc.quick_profit_engine import quick_profit_engine
+from backend.strategies.quick_profit_engine import quick_profit_engine
 from backend.strategies.arbitrage_detector import arbitrage_detector
 from backend.strategies.news_trading import news_trading_system
 # Import MT5 executor lazily inside methods to avoid hard fail if MT5 not configured
@@ -71,6 +71,23 @@ class AutoTrader:
         self.atr_sl_mult: float = float(os.environ.get("AUTO_TRADE_ATR_SL_MULT", "1.5"))
         self.atr_tp_mult: float = float(os.environ.get("AUTO_TRADE_ATR_TP_MULT", "2.0"))
         self.cooldown_sec: int = int(os.environ.get("AUTO_TRADE_COOLDOWN_SEC", "300"))
+        
+        # Circuit breaker configuration
+        self.max_losses_per_day: int = int(os.environ.get("AUTO_TRADE_MAX_LOSSES_DAY", "3"))
+        self.max_drawdown_pct: float = float(os.environ.get("AUTO_TRADE_MAX_DRAWDOWN_PCT", "0.05"))
+        self.losses_today: int = 0
+        self.daily_pnl: float = 0.0
+        self.circuit_breaker_active: bool = False
+        self.circuit_breaker_reason: str = ""
+        
+        # Position limits
+        self.max_positions_per_symbol: int = int(os.environ.get("AUTO_TRADE_MAX_POS_SYMBOL", "1"))
+        self.max_total_positions: int = int(os.environ.get("AUTO_TRADE_MAX_TOTAL_POS", "5"))
+        self.active_positions: Dict[str, int] = {}
+        
+        # Timeout configuration
+        self.order_timeout_sec: float = float(os.environ.get("AUTO_TRADE_ORDER_TIMEOUT", "5.0"))
+        self.signal_timeout_sec: float = float(os.environ.get("AUTO_TRADE_SIGNAL_TIMEOUT", "10.0"))
         # Fusion/regime gating params
         self.min_edge: float = float(os.environ.get("AUTO_TRADE_MIN_EDGE", "0.01"))
         self.max_bucket_exposure: int = int(
@@ -94,10 +111,15 @@ class AutoTrader:
         # Runtime counters/state
         self.signals_today: int = 0
         self.executed_today: int = 0
+        self.failed_today: int = 0
         self._counters_day: str = datetime.now().strftime("%Y-%m-%d")
         self._started_at: Optional[float] = None
         self._stop_event: asyncio.Event = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
+        
+        # Health monitoring
+        self._last_health_check: float = time.time()
+        self._health_check_interval: float = 30.0  # Check health every 30 seconds
 
         # WebSocket clients
         self._clients: Set[WebSocket] = set()
@@ -140,7 +162,14 @@ class AutoTrader:
             await self._broadcast_status()
 
             while self.running and not self._stop_event.is_set():
+                tick_start = time.time()
                 await self._tick()
+                tick_duration = time.time() - tick_start
+                
+                # Log slow ticks
+                if tick_duration > 10:
+                    logger.warning(f"Slow tick detected: {tick_duration:.1f}s")
+                
                 # Sleep with stop awareness
                 try:
                     await asyncio.wait_for(self._stop_event.wait(), timeout=self.interval_sec)
@@ -176,11 +205,40 @@ class AutoTrader:
 
     async def _tick(self) -> None:
         self._ensure_today_counters()
+        
+        # Check circuit breaker before processing
+        if self._check_circuit_breaker():
+            logger.warning(f"Circuit breaker active: {self.circuit_breaker_reason}")
+            return
+        
+        # Health check
+        if time.time() - self._last_health_check > self._health_check_interval:
+            await self._perform_health_check()
+            self._last_health_check = time.time()
+        
+        # Check total position limits
+        total_positions = sum(self.active_positions.values())
+        if total_positions >= self.max_total_positions:
+            logger.info(f"Max total positions reached ({total_positions}/{self.max_total_positions})")
+            return
+        
         for symbol in self.symbols:
             try:
-                await self._process_symbol(symbol)
+                # Check per-symbol position limit
+                if self.active_positions.get(symbol, 0) >= self.max_positions_per_symbol:
+                    logger.debug(f"Max positions for {symbol} reached")
+                    continue
+                    
+                await asyncio.wait_for(
+                    self._process_symbol(symbol),
+                    timeout=self.signal_timeout_sec
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"Processing timeout for {symbol} after {self.signal_timeout_sec}s")
+                self.failed_today += 1
             except Exception:
                 logger.exception(f"AutoTrader symbol loop error for {symbol}")
+                self.failed_today += 1
 
     def _ensure_today_counters(self) -> None:
         today = datetime.now().strftime("%Y-%m-%d")
@@ -188,6 +246,12 @@ class AutoTrader:
             self._counters_day = today
             self.signals_today = 0
             self.executed_today = 0
+            self.failed_today = 0
+            self.losses_today = 0
+            self.daily_pnl = 0.0
+            self.circuit_breaker_active = False
+            self.circuit_breaker_reason = ""
+            logger.info(f"AutoTrader counters reset for new day: {today}")
 
     async def register_client(self, websocket: WebSocket) -> None:
         await websocket.accept()
@@ -280,6 +344,50 @@ class AutoTrader:
 
         return []
 
+    def _check_circuit_breaker(self) -> bool:
+        """Check if circuit breaker should be activated"""
+        if self.circuit_breaker_active:
+            return True
+            
+        # Check max losses per day
+        if self.losses_today >= self.max_losses_per_day:
+            self.circuit_breaker_active = True
+            self.circuit_breaker_reason = f"Max daily losses reached ({self.losses_today}/{self.max_losses_per_day})"
+            logger.error(self.circuit_breaker_reason)
+            return True
+            
+        # Check max drawdown
+        if self.daily_pnl < 0 and abs(self.daily_pnl) > self.max_drawdown_pct:
+            self.circuit_breaker_active = True
+            self.circuit_breaker_reason = f"Max drawdown exceeded ({self.daily_pnl:.2%}/{self.max_drawdown_pct:.2%})"
+            logger.error(self.circuit_breaker_reason)
+            return True
+            
+        # Check excessive failures
+        if self.failed_today > 10:
+            self.circuit_breaker_active = True
+            self.circuit_breaker_reason = f"Excessive failures ({self.failed_today})"
+            logger.error(self.circuit_breaker_reason)
+            return True
+            
+        return False
+    
+    async def _perform_health_check(self) -> None:
+        """Perform health checks on dependencies"""
+        try:
+            # Check MT5 connection
+            if not mt5_market_feed._connected:
+                logger.warning("MT5 feed not connected during health check")
+                
+            # Check risk engine status
+            risk_status = risk_engine.get_status()
+            if risk_status.get("kill_switch_engaged"):
+                self.circuit_breaker_active = True
+                self.circuit_breaker_reason = "Risk engine kill switch engaged"
+                logger.error(self.circuit_breaker_reason)
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
+    
     @track_performance("AutoTrader._process_symbol")
     async def _process_symbol(self, symbol: str) -> None:
         # Enforce cooldown
@@ -881,26 +989,45 @@ class AutoTrader:
         except Exception:
             pass
 
-        # Execute via Fusion Core
+        # Execute via Fusion Core with timeout
         try:
-            placed = engine.execute_trade(idea, current_price=price)
+            placed = await asyncio.wait_for(
+                asyncio.to_thread(engine.execute_trade, idea, current_price=price),
+                timeout=self.order_timeout_sec
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Order execution timeout for {symbol} after {self.order_timeout_sec}s")
+            self.failed_today += 1
+            placed = False
         except Exception:
             logger.exception("Fusion execute_trade failed for %s", symbol)
+            self.failed_today += 1
             placed = False
 
         if placed:
             self._last_trade_ts[symbol] = now
+            # Update position tracking
+            self.active_positions[symbol] = self.active_positions.get(symbol, 0) + 1
             logger.info(
-                "Trade processed %s: placed=%s dry_run=%s",
+                "Trade processed %s: placed=%s dry_run=%s positions=%d",
                 symbol,
                 placed,
                 self.dry_run,
+                self.active_positions[symbol]
             )
             self.executed_today += 1
+            
+            # Track outcome for circuit breaker
+            asyncio.create_task(self._monitor_trade_outcome(symbol, idea))
+            
             try:
                 await self._broadcast_status()
             except Exception:
                 pass
+        else:
+            # Track failed trade
+            if not placed:
+                logger.warning(f"Trade execution failed for {symbol}")
 
     # -------------------- Helpers: currency exposure --------------------
     def _parse_fx(self, symbol: str) -> Tuple[str, str]:
@@ -1074,7 +1201,7 @@ class AutoTrader:
             logger.info(f"Open position exists for {symbol}; skipping new trade")
             return False
 
-        # Execute
+        # Execute with timeout
         try:
             if self.dry_run:
                 from backend.services.mt5_executor import execute_order
@@ -1144,7 +1271,33 @@ class AutoTrader:
             logger.info("AutoTrader parameters updated: %s", changes)
         return changes
 
-    def get_status(self) -> Dict[str, object]:
+    async def _monitor_trade_outcome(self, symbol: str, idea: Any) -> None:
+        """Monitor trade outcome for circuit breaker tracking"""
+        await asyncio.sleep(60)  # Wait 60s then check
+        try:
+            from backend.services.mt5_executor import mt5_executor
+            positions = mt5_executor.get_positions()
+            
+            # Check if position still exists
+            position = next((p for p in positions if p.get("symbol") == symbol), None)
+            
+            if position:
+                profit = position.get("profit", 0.0)
+                if profit < 0:
+                    self.losses_today += 1
+                    self.daily_pnl += profit
+                    logger.info(f"Trade loss recorded for {symbol}: {profit:.2f}")
+                else:
+                    self.daily_pnl += profit
+                    logger.info(f"Trade profit recorded for {symbol}: {profit:.2f}")
+            else:
+                # Position closed, check history if available
+                logger.debug(f"Position for {symbol} no longer active")
+                
+        except Exception as e:
+            logger.error(f"Failed to monitor trade outcome: {e}")
+    
+    def get_status(self) -> Dict[str, Any]:
         uptime = (
             float(time.time() - self._started_at)
             if (self._started_at is not None and self.running)
@@ -1156,17 +1309,22 @@ class AutoTrader:
             ws_clients = 0
         return {
             "running": self.running,
+            "enabled": bool(os.environ.get("AUTO_TRADE_ENABLED") == "1"),
             "symbols": self.symbols,
             "interval_sec": self.interval_sec,
             "threshold": self.threshold,
             "primary_model": self.primary_model,
             "dry_run": self.dry_run,
-            "atr_period": self.atr_period,
-            "last_trade_ts": self._last_trade_ts,
             "signals_today": self.signals_today,
             "executed_today": self.executed_today,
-            "counters_day": self._counters_day,
-            "started_at": self._started_at,
+            "failed_today": self.failed_today,
+            "losses_today": self.losses_today,
+            "daily_pnl": self.daily_pnl,
+            "circuit_breaker_active": self.circuit_breaker_active,
+            "circuit_breaker_reason": self.circuit_breaker_reason,
+            "active_positions": dict(self.active_positions),
+            "max_positions_per_symbol": self.max_positions_per_symbol,
+            "max_total_positions": self.max_total_positions,
             "uptime_sec": uptime,
             "ws_clients": ws_clients,
         }

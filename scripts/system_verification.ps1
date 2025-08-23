@@ -1,12 +1,12 @@
 param(
-  [string]$Host = '127.0.0.1',
+  [string]$BindHost = '127.0.0.1',
   [int]$BackendPort = 8000,
   [int]$FrontendPort = 5175,
   [switch]$Verbose
 )
 
 $ErrorActionPreference = 'Stop'
-$base = "http://$Host`:$BackendPort"
+$base = "http://$BindHost`:$BackendPort"
 
 function Write-Status([string]$msg, [string]$status = 'INFO') {
   $color = switch($status) {
@@ -128,7 +128,7 @@ try {
 # 7. Frontend Availability
 Write-Status "Checking frontend availability..." 'INFO'
 try {
-  $frontend = Invoke-WebRequest -Uri "http://$Host`:$FrontendPort" -Method GET -TimeoutSec 3
+  $frontend = Invoke-WebRequest -Uri "http://$BindHost`:$FrontendPort" -Method GET -TimeoutSec 3
   if ($frontend.StatusCode -eq 200) {
     Write-Status "Frontend: OK (HTTP $($frontend.StatusCode))" 'OK'
   }
@@ -147,5 +147,5 @@ if ($cppStatus.success) {
 
 Write-Status "=== Verification Complete ===" 'INFO'
 Write-Status "Backend: $base" 'INFO'
-Write-Status "Frontend: http://$Host`:$FrontendPort" 'INFO'
+Write-Status "Frontend: http://$BindHost`:$FrontendPort" 'INFO'
 Write-Status "API Docs: $base/docs" 'INFO'

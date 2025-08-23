@@ -8,17 +8,7 @@ export default defineConfig({
     }
   },
   server: {
-    port: 5175,
-    proxy: {
-      '/trading': { target: 'http://localhost:8000', changeOrigin: true },
-      '/account': { target: 'http://localhost:8000', changeOrigin: true },
-      '/market': { target: 'http://localhost:8000', changeOrigin: true },
-      '/positions': { target: 'http://localhost:8000', changeOrigin: true },
-      '/signals': { target: 'http://localhost:8000', changeOrigin: true },
-      '/monitoring': { target: 'http://localhost:8000', changeOrigin: true, ws: true },
-      '/api': { target: 'http://localhost:8000', changeOrigin: true },
-      '/admin': { target: 'http://localhost:8000', changeOrigin: true },
-      '/ws': { target: 'ws://localhost:8000', ws: true }
-    }
+    host: '0.0.0.0',
+    port: 5175
   }
 })

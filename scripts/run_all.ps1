@@ -1,6 +1,6 @@
 param(
   [ValidateSet('dev','prod')][string]$Mode = 'dev',
-  [string]$Host = '127.0.0.1',
+  [string]$BindHost = '127.0.0.1',
   [int]$BackendPort = 8000,
   [int]$FrontendPort = 5175,
   [string]$PythonPath = '.venv\Scripts\python.exe',
@@ -24,8 +24,12 @@ if (-not $npm) { Write-Err 'npm is not installed or not in PATH'; exit 1 }
 
 # Set env that backend expects
 $env:TRADE_DB = Join-Path $repoRoot 'logs\trade_memory.sqlite'
+# Standard CORS env per production_config.py; keep legacy for back-compat
+if (-not $env:ARIA_CORS_ORIGINS) {
+  $env:ARIA_CORS_ORIGINS = "http://localhost:$FrontendPort,http://127.0.0.1:$FrontendPort"
+}
 if (-not $env:ARIA_ALLOWED_ORIGINS) {
-  $env:ARIA_ALLOWED_ORIGINS = "http://localhost:$FrontendPort,http://127.0.0.1:$FrontendPort,http://localhost:5176,http://127.0.0.1:5176"
+  $env:ARIA_ALLOWED_ORIGINS = "$($env:ARIA_CORS_ORIGINS),http://localhost:5176,http://127.0.0.1:5176"
 }
 
 if (-not $SkipInstall) {
@@ -45,7 +49,7 @@ if (-not $SkipInstall) {
 }
 
 # Backend — start if not healthy
-$base = "http://$Host`:$BackendPort"
+$base = "http://$BindHost`:$BackendPort"
 function Test-Health { try { Invoke-RestMethod -Uri "$base/health" -Method Get -TimeoutSec 2 } catch { $null } }
 function Wait-Health([int]$TimeoutSec){ $deadline=(Get-Date).AddSeconds($TimeoutSec); while((Get-Date) -lt $deadline){ $h=Test-Health; if($h -and $h.status -eq 'ok'){ return $h }; Start-Sleep -Milliseconds 500 }; throw "Health timeout" }
 
@@ -53,7 +57,7 @@ $h = Test-Health
 $backendStarted = $false
 if (-not $h) {
   Write-Info "Starting backend on $base ..."
-  $args = @('-m','uvicorn','backend.main:app','--host', $Host, '--port', $BackendPort.ToString())
+  $args = @('-m','uvicorn','backend.main:app','--host', $BindHost, '--port', $BackendPort.ToString())
   $proc = Start-Process -FilePath $PythonPath -ArgumentList $args -PassThru -WindowStyle Hidden
   $backendStarted = $true
   Set-Content -Path (Join-Path $logDir 'backend.pid') -Value $proc.Id

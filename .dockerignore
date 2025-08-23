@@ -1,0 +1,114 @@
+# Git and version control
+.git
+.gitignore
+.gitattributes
+
+# Development files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment files (secrets)
+*.env
+.env.*
+production.env
+development.env
+
+# Testing
+.tox/
+.coverage
+.pytest_cache/
+htmlcov/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Documentation
+docs/
+*.md
+README*
+CHANGELOG*
+LICENSE*
+
+# IDE and editor files
+.vscode/
+.idea/
+*.sublime-*
+.atom/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs and data (will be mounted as volumes)
+logs/
+data/
+*.log
+*.sqlite
+*.db
+
+# Frontend build artifacts
+frontend/
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Scripts and tools
+scripts/
+tools/
+tests/
+test_*.py
+*_test.py
+
+# Backup files
+*.bak
+*.backup
+*.old
+*.orig
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp

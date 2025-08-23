@@ -252,6 +252,7 @@ cython_debug/
 *.backup
 *~
 .venv/
+
 *.log
 .env
 __pycache__/
@@ -260,3 +261,13 @@ __pycache__/
 
 # Local Netlify folder
 .netlify
+
+# Normalize line endings across OS
+* text=auto eol=lf
+
+# Keep Windows batch files CRLF
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Keep shell scripts LF
+*.sh text eol=lf

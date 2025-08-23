@@ -592,6 +592,14 @@ async def websocket_performance_endpoint(websocket: WebSocket):
     try:
         # Start monitoring if not already started
         await monitor.start_monitoring()
+        # Immediately send a snapshot so clients don't wait for the first interval tick
+        try:
+            await websocket.send_json({
+                "type": "system_metrics",
+                "metrics": monitor.get_system_metrics(),
+            })
+        except Exception as e:
+            logger.debug(f"Initial system metrics snapshot send failed: {e}")
         
         while True:
             # Keep connection alive and handle incoming messages

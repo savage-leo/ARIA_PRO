@@ -193,6 +193,7 @@ class PerformanceMonitor:
         self.max_metrics = max_metrics
         # Lazily created within the event loop context to avoid cross-loop usage
         self._lock: Optional[asyncio.Lock] = None
+        self._lock_loop: Optional[asyncio.AbstractEventLoop] = None
         self.start_time = time.time()
         self.active_connections: List[Any] = []
         self._monitoring_task = None
@@ -206,6 +207,29 @@ class PerformanceMonitor:
             "mem_available_percent_crit": float(os.environ.get("ARIA_THRESH_MEM_AVAIL_CRIT", "10")),
             "latency_warn_ms": float(os.environ.get("ARIA_THRESH_LATENCY_WARN_MS", "1000")),
         }
+        
+    def _in_pm_loop(self) -> bool:
+        """Return True if currently executing inside the monitor's event loop."""
+        try:
+            return asyncio.get_running_loop() is self._loop
+        except RuntimeError:
+            return False
+
+    async def _run_in_pm_loop(self, coro):
+        """Run the given coroutine on the monitor's loop, awaiting completion.
+        If called from the same loop, executes directly. If no loop is bound,
+        executes in the current loop.
+        """
+        if self._loop and self._loop.is_running() and not self._in_pm_loop():
+            cf = asyncio.run_coroutine_threadsafe(coro, self._loop)
+            try:
+                # Bridge to the current loop safely
+                return await asyncio.wrap_future(cf)
+            except RuntimeError:
+                # No running loop in this thread; block for result
+                return cf.result()
+        # Fallback: run in the current loop
+        return await coro
         
     async def start_monitoring(self):
         """Start background monitoring tasks."""
@@ -276,29 +300,30 @@ class PerformanceMonitor:
                 self._update_metrics(model_name, latency_ms, cpu_metrics, symbol)
             )
     
-    async def _update_metrics(self, model_name: str, latency_ms: float, cpu_metrics: Dict, symbol: Optional[str] = None):
-        """Update metrics for a model asynchronously."""
-        if self._lock is None:
-            # Create lock in the active loop context
+    async def _update_metrics_impl(self, model_name: str, latency_ms: float, cpu_metrics: Dict, symbol: Optional[str] = None):
+        """Implementation: update metrics for a model on the monitor's loop."""
+        current_loop = asyncio.get_running_loop()
+        if self._lock is None or self._lock_loop is not current_loop:
+            # Create/recreate lock in the active loop context
             self._lock = asyncio.Lock()
+            self._lock_loop = current_loop
         async with self._lock:
             if model_name not in self.models:
                 self.models[model_name] = ModelMetrics(model_name=model_name)
-                
             try:
                 self.models[model_name].update(latency_ms, cpu_metrics)
-                
+
                 # Truncate old metrics to prevent memory leaks
                 metrics = self.models[model_name]
                 for metric_list in [metrics.cpu_percent, metrics.memory_usage]:
                     if len(metric_list) > self.max_metrics:
                         metric_list[:] = metric_list[-self.max_metrics:]
-                
+
                 # Broadcast update
                 await self._broadcast_metrics({
                     "type": "model_metrics",
                     "model": model_name,
-                    "metrics": metrics.to_dict()
+                    "metrics": metrics.to_dict(),
                 })
 
                 # Per-symbol metrics update if symbol provided
@@ -324,6 +349,12 @@ class PerformanceMonitor:
                 logger.error(f"Error updating metrics for {model_name}: {e}")
                 if model_name in self.models:
                     self.models[model_name].errors += 1
+
+    async def _update_metrics(self, model_name: str, latency_ms: float, cpu_metrics: Dict, symbol: Optional[str] = None):
+        """Public API used by tests and track_model: route to monitor loop if needed."""
+        return await self._run_in_pm_loop(
+            self._update_metrics_impl(model_name, latency_ms, cpu_metrics, symbol)
+        )
     
     async def track_model_async(
         self, 
@@ -402,8 +433,8 @@ class PerformanceMonitor:
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
     
-    async def check_thresholds(self):
-        """Check metrics against thresholds and generate alerts."""
+    async def _check_thresholds_impl(self):
+        """Implementation: run threshold checks and broadcast on the monitor's loop."""
         system = self.get_system_metrics()
         cpu_warn = self.thresholds.get("cpu_warn_percent", 90.0)
         mem_crit = self.thresholds.get("mem_available_percent_crit", 10.0)
@@ -415,18 +446,18 @@ class PerformanceMonitor:
                 "type": "alert",
                 "message": f"High CPU Usage: {system['system']['cpu_percent']:.1f}% (>{cpu_warn}%)",
                 "timestamp": datetime.now().isoformat(),
-                "severity": "warning"
+                "severity": "warning",
             })
-            
+
         # Memory threshold check
         if system['system']['memory']['available_percent'] < mem_crit:
             await self._broadcast_metrics({
                 "type": "alert",
                 "message": f"Low available memory (< {mem_crit}%)",
                 "timestamp": datetime.now().isoformat(),
-                "severity": "critical"
+                "severity": "critical",
             })
-        
+
         # Model latency threshold checks
         for model_name, metrics in self.models.items():
             if metrics.ema_latency and metrics.ema_latency > lat_warn:  # configurable threshold
@@ -434,7 +465,7 @@ class PerformanceMonitor:
                     "type": "alert",
                     "message": f"High latency in {model_name}: {metrics.ema_latency:.1f}ms (>{lat_warn}ms)",
                     "timestamp": datetime.now().isoformat(),
-                    "severity": "warning"
+                    "severity": "warning",
                 })
 
         # Per-symbol latency threshold checks
@@ -445,8 +476,14 @@ class PerformanceMonitor:
                         "type": "alert",
                         "message": f"High latency {symbol}/{model_name}: {metrics.ema_latency:.1f}ms (>{lat_warn}ms)",
                         "timestamp": datetime.now().isoformat(),
-                        "severity": "warning"
+                        "severity": "warning",
                     })
+
+    async def check_thresholds(self):
+        """Check metrics against thresholds and generate alerts.
+        Ensures execution on the monitor's event loop to safely broadcast.
+        """
+        return await self._run_in_pm_loop(self._check_thresholds_impl())
 
     async def log_metrics(self) -> None:
         """Log performance metrics periodically."""

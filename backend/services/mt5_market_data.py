@@ -13,9 +13,9 @@ from backend.core.config import get_settings
 logger = logging.getLogger("MT5.MARKET")
 try:
     import MetaTrader5 as mt5
-
     MT5_AVAILABLE = True
-except Exception:
+except ImportError as e:
+    logger.error(f"MetaTrader5 library not installed: {e}")
     MT5_AVAILABLE = False
 
 
@@ -30,22 +30,29 @@ class MT5MarketFeed:
     If MT5 feed fails or stops, engage kill-switch via callback.
     """
 
-    def __init__(self, poll_interval: float = 0.1, health_window: int = 10):
+    def __init__(self, poll_interval: float = 0.1, health_window: int = 10, max_queue_size: int = 10000):
         self.poll_interval = poll_interval
         self.health_window = health_window
         self._tick_listeners = {}
+        self._listener_lock = threading.Lock()  # Thread safety for listeners
         self._running = False
         self._threads = []
-        self._tick_q = queue.Queue()
+        self._tick_q = queue.Queue(maxsize=max_queue_size)  # Bounded queue to prevent OOM
         self._last_tick_ts = time.time()
         self._health_lock = threading.Lock()
         self._connected = False
+        self._connection_lock = threading.Lock()  # Thread safety for connection state
         self._kill_cb = None  # callback to call when failing
         self._symbols = set()
+        self._symbols_lock = threading.Lock()  # Thread safety for symbols set
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         # Aggregate ticks into bars at configurable interval (default 60s)
         self.bar_interval = get_settings().mt5_bar_seconds
         self._bar_state: Dict[str, Dict[str, float]] = {}
+        self._bar_state_lock = threading.Lock()  # Thread safety for bar state
+        self._retry_count = 0
+        self._max_retries = 3
+        self._retry_delay = 1.0  # Initial retry delay in seconds
 
     @property
     def running(self) -> bool:
@@ -53,30 +60,68 @@ class MT5MarketFeed:
         return self._running
 
     def connect(self) -> bool:
-        if not MT5_AVAILABLE:
-            logger.warning("MT5 package not available.")
+        with self._connection_lock:
+            if not MT5_AVAILABLE:
+                logger.error("MT5 package not available. Cannot connect.")
+                return False
+            if self._connected:
+                return True
+                
+            # Retry logic with exponential backoff
+            retry_delay = self._retry_delay
+            for attempt in range(self._max_retries):
+                try:
+                    if not mt5.initialize():
+                        error = mt5.last_error()
+                        logger.error(f"MT5.initialize() failed (attempt {attempt+1}/{self._max_retries}): {error}")
+                        if attempt < self._max_retries - 1:
+                            time.sleep(retry_delay)
+                            retry_delay *= 2  # Exponential backoff
+                            continue
+                        return False
+                        
+                    # Validate and login with credentials
+                    try:
+                        s = get_settings()
+                        login = s.MT5_LOGIN
+                        password = s.MT5_PASSWORD
+                        server = s.MT5_SERVER
+                        
+                        if not login or not password or not server:
+                            logger.error("MT5 credentials missing. Login/Password/Server required.")
+                            mt5.shutdown()
+                            return False
+                            
+                        login_id = int(login)
+                        if not mt5.login(login=login_id, password=password, server=server):
+                            error = mt5.last_error()
+                            logger.error(f"MT5.login failed: {error}")
+                            mt5.shutdown()
+                            if attempt < self._max_retries - 1:
+                                time.sleep(retry_delay)
+                                retry_delay *= 2
+                                continue
+                            return False
+                            
+                        logger.info(f"MT5 login successful to server {server} (account: {login_id})")
+                        self._connected = True
+                        self._retry_count = 0  # Reset retry count on success
+                        return True
+                        
+                    except (ValueError, TypeError) as e:
+                        logger.error(f"Invalid MT5 credentials format: {e}")
+                        mt5.shutdown()
+                        return False
+                        
+                except Exception as e:
+                    logger.exception(f"Unexpected error during MT5 connection (attempt {attempt+1}): {e}")
+                    if attempt < self._max_retries - 1:
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                        continue
+                    return False
+                    
             return False
-        if self._connected:
-            return True
-        if not mt5.initialize():
-            logger.error("MT5.initialize() failed: %s", mt5.last_error())
-            return False
-        # Optional explicit account login via environment variables
-        try:
-            s = get_settings()
-            login = s.MT5_LOGIN
-            password = s.MT5_PASSWORD
-            server = s.MT5_SERVER
-            if login is not None and password and server:
-                if not mt5.login(login=int(login), password=password, server=server):
-                    logger.error("MT5.login failed: %s", mt5.last_error())
-                else:
-                    logger.info("MT5 login successful to server %s", server)
-        except Exception:
-            logger.debug("MT5 login step skipped or failed", exc_info=True)
-        self._connected = True
-        logger.info("MT5 connected.")
-        return True
 
     def disconnect(self):
         if MT5_AVAILABLE and self._connected:
@@ -134,10 +179,12 @@ class MT5MarketFeed:
     def subscribe_tick(
         self, symbol: str, callback: Callable[[str, Dict[str, Any]], None]
     ):
-        self._tick_listeners.setdefault(symbol, []).append(callback)
-        self._symbols.add(symbol)
+        with self._listener_lock:
+            self._tick_listeners.setdefault(symbol, []).append(callback)
+        with self._symbols_lock:
+            self._symbols.add(symbol)
         try:
-            if MT5_AVAILABLE:
+            if MT5_AVAILABLE and self._connected:
                 mt5.symbol_select(symbol, True)
         except Exception:
             logger.debug("mt5.symbol_select failed for %s", symbol, exc_info=True)
@@ -164,7 +211,18 @@ class MT5MarketFeed:
                             "ask": float(tick.ask),
                             "time": float(tick.time),
                         }
-                        self._tick_q.put((sym, tickd))
+                        # Use put_nowait to avoid blocking, drop oldest if full
+                        try:
+                            self._tick_q.put_nowait((sym, tickd))
+                        except queue.Full:
+                            # Queue is full, drop the oldest tick
+                            try:
+                                self._tick_q.get_nowait()
+                                self._tick_q.put_nowait((sym, tickd))
+                                logger.debug(f"Tick queue full, dropped oldest tick for {sym}")
+                            except queue.Empty:
+                                pass
+                        
                         with self._health_lock:
                             self._last_tick_ts = time.time()
                     except Exception:
@@ -178,11 +236,13 @@ class MT5MarketFeed:
         while self._running:
             try:
                 sym, tick = self._tick_q.get(timeout=1.0)
-                for cb in list(self._tick_listeners.get(sym, [])):
+                with self._listener_lock:
+                    listeners = list(self._tick_listeners.get(sym, []))
+                for cb in listeners:
                     try:
                         cb(sym, tick)
-                    except Exception:
-                        logger.exception("Tick callback err")
+                    except Exception as e:
+                        logger.exception(f"Tick callback error for {sym}: {e}")
                 # Broadcast tick to WebSocket clients (best-effort)
                 try:
                     if self._loop is not None:
@@ -306,8 +366,8 @@ class MT5MarketFeed:
                 if self._kill_cb:
                     try:
                         self._kill_cb()
-                    except Exception:
-                        logger.exception("kill callback failed")
+                    except Exception as e:
+                        logger.exception(f"Kill callback failed: {e}")
                 # mark disconnected and attempt reconnect
                 try:
                     self.disconnect()

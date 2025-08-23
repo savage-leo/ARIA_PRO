@@ -1,4 +1,6 @@
 import logging
+import asyncio
+import threading
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from dataclasses import dataclass
@@ -26,6 +28,11 @@ class RiskConfig:
 
 class RiskEngine:
     def __init__(self):
+        # Thread-safe locks for shared state
+        self._state_lock = threading.Lock()
+        self._async_lock = asyncio.Lock()
+        self._kill_switch_lock = threading.Lock()
+        
         self.risk_configs = {
             RiskLevel.CONSERVATIVE: RiskConfig(
                 max_position_size=1.0,
@@ -53,20 +60,26 @@ class RiskEngine:
             ),
         }
 
+        # Protected shared state
         self.current_risk_level = RiskLevel.MODERATE
         self.daily_pnl = 0.0
         self.max_equity = 0.0
         self.positions_history = []
         self.slippage_log = []
+        self.kill_switch_engaged = False
+        self.kill_switch_reason = ""
+        self._last_update = datetime.now()
 
     def set_risk_level(self, level: RiskLevel):
         """Set the current risk level"""
-        self.current_risk_level = level
-        logger.info(f"Risk level set to: {level.value}")
+        with self._state_lock:
+            self.current_risk_level = level
+            logger.info(f"Risk level set to: {level.value}")
 
     def get_risk_config(self) -> RiskConfig:
         """Get current risk configuration"""
-        return self.risk_configs[self.current_risk_level]
+        with self._state_lock:
+            return self.risk_configs[self.current_risk_level]
 
     def calculate_position_size(
         self,
@@ -117,28 +130,32 @@ class RiskEngine:
                 f"Position size exceeds {config.max_position_size}% of account"
             )
 
-        # Check daily loss limit
-        if self.daily_pnl < -(
-            account_info.get("balance", 0) * (config.max_daily_loss / 100.0)
-        ):
-            validation_result["approved"] = False
-            validation_result["errors"].append("Daily loss limit exceeded")
+        # Check daily loss limit (thread-safe)
+        with self._state_lock:
+            if self.daily_pnl < -(
+                account_info.get("balance", 0) * (config.max_daily_loss / 100.0)
+            ):
+                validation_result["approved"] = False
+                validation_result["errors"].append("Daily loss limit exceeded")
+                self._trigger_kill_switch("Daily loss limit exceeded")
 
-        # Check drawdown
-        current_equity = account_info.get("equity", 0)
-        if current_equity > self.max_equity:
-            self.max_equity = current_equity
+        # Check drawdown (thread-safe)
+        with self._state_lock:
+            current_equity = account_info.get("equity", 0)
+            if current_equity > self.max_equity:
+                self.max_equity = current_equity
 
-        drawdown = (
-            (self.max_equity - current_equity) / self.max_equity * 100
-            if self.max_equity > 0
-            else 0
-        )
-        if drawdown > config.max_drawdown:
-            validation_result["approved"] = False
-            validation_result["errors"].append(
-                f"Maximum drawdown exceeded: {drawdown:.2f}%"
+            drawdown = (
+                (self.max_equity - current_equity) / self.max_equity * 100
+                if self.max_equity > 0
+                else 0
             )
+            if drawdown > config.max_drawdown:
+                validation_result["approved"] = False
+                validation_result["errors"].append(
+                    f"Maximum drawdown exceeded: {drawdown:.2f}%"
+                )
+                self._trigger_kill_switch(f"Maximum drawdown exceeded: {drawdown:.2f}%")
 
         # Check total exposure
         total_exposure = sum(
@@ -176,11 +193,12 @@ class RiskEngine:
             "within_limit": slippage_pips <= config.max_slippage,
         }
 
-        self.slippage_log.append(slippage_record)
+        with self._state_lock:
+            self.slippage_log.append(slippage_record)
 
-        # Keep only last 1000 records
-        if len(self.slippage_log) > 1000:
-            self.slippage_log = self.slippage_log[-1000:]
+            # Keep only last 1000 records
+            if len(self.slippage_log) > 1000:
+                self.slippage_log = self.slippage_log[-1000:]
 
         if slippage_pips > config.max_slippage:
             logger.warning(
@@ -191,12 +209,15 @@ class RiskEngine:
 
     def update_daily_pnl(self, pnl: float):
         """Update daily P&L tracking"""
-        self.daily_pnl += pnl
+        with self._state_lock:
+            self.daily_pnl += pnl
+            self._last_update = datetime.now()
 
-        # Reset daily P&L at midnight
-        now = datetime.now()
-        if now.hour == 0 and now.minute == 0:
-            self.daily_pnl = 0.0
+            # Reset daily P&L at midnight
+            now = datetime.now()
+            if now.hour == 0 and now.minute == 0:
+                self.daily_pnl = 0.0
+                logger.info("Daily P&L reset at midnight")
 
     def check_position_timeout(
         self, positions: List[Dict[str, Any]]
@@ -223,66 +244,108 @@ class RiskEngine:
 
     def get_risk_metrics(self, account_info: Dict[str, Any]) -> Dict[str, Any]:
         """Get current risk metrics"""
-        config = self.get_risk_config()
-        current_equity = account_info.get("equity", 0)
+        with self._state_lock:
+            config = self.get_risk_config()
+            current_equity = account_info.get("equity", 0)
 
-        # Calculate drawdown
-        drawdown = (
-            (self.max_equity - current_equity) / self.max_equity * 100
-            if self.max_equity > 0
-            else 0
-        )
+            # Calculate drawdown
+            drawdown = (
+                (self.max_equity - current_equity) / self.max_equity * 100
+                if self.max_equity > 0
+                else 0
+            )
 
-        # Calculate average slippage
-        avg_slippage = (
-            sum(record["slippage_pips"] for record in self.slippage_log)
-            / len(self.slippage_log)
-            if self.slippage_log
-            else 0
-        )
+            # Calculate average slippage
+            avg_slippage = (
+                sum(record["slippage_pips"] for record in self.slippage_log)
+                / len(self.slippage_log)
+                if self.slippage_log
+                else 0
+            )
 
-        return {
-            "risk_level": self.current_risk_level.value,
-            "daily_pnl": self.daily_pnl,
-            "max_equity": self.max_equity,
-            "current_drawdown": drawdown,
-            "max_drawdown_allowed": config.max_drawdown,
-            "daily_loss_limit": account_info.get("balance", 0)
-            * (config.max_daily_loss / 100.0),
-            "position_size_limit": account_info.get("balance", 0)
-            * (config.max_position_size / 100.0),
-            "exposure_limit": account_info.get("balance", 0)
-            * (config.max_exposure / 100.0),
-            "max_slippage_allowed": config.max_slippage,
-            "average_slippage": avg_slippage,
-            "slippage_violations": len(
-                [r for r in self.slippage_log if not r["within_limit"]]
-            ),
-            "total_trades_tracked": len(self.slippage_log),
-        }
+            return {
+                "risk_level": self.current_risk_level.value,
+                "daily_pnl": self.daily_pnl,
+                "max_equity": self.max_equity,
+                "current_drawdown": drawdown,
+                "max_drawdown_allowed": config.max_drawdown,
+                "daily_loss_limit": account_info.get("balance", 0)
+                * (config.max_daily_loss / 100.0),
+                "position_size_limit": account_info.get("balance", 0)
+                * (config.max_position_size / 100.0),
+                "exposure_limit": account_info.get("balance", 0)
+                * (config.max_exposure / 100.0),
+                "max_slippage_allowed": config.max_slippage,
+                "average_slippage": avg_slippage,
+                "slippage_violations": len(
+                    [r for r in self.slippage_log if not r["within_limit"]]
+                ),
+                "total_trades_tracked": len(self.slippage_log),
+                "kill_switch_engaged": self.kill_switch_engaged,
+                "kill_switch_reason": self.kill_switch_reason,
+                "last_update": self._last_update.isoformat(),
+            }
 
+    def _trigger_kill_switch(self, reason: str) -> None:
+        """Trigger the kill switch to halt all trading"""
+        with self._kill_switch_lock:
+            if not self.kill_switch_engaged:
+                self.kill_switch_engaged = True
+                self.kill_switch_reason = reason
+                logger.critical(f"KILL SWITCH ENGAGED: {reason}")
+    
+    def reset_kill_switch(self) -> None:
+        """Reset the kill switch (admin only)"""
+        with self._kill_switch_lock:
+            self.kill_switch_engaged = False
+            self.kill_switch_reason = ""
+            logger.warning("Kill switch reset by admin")
+    
+    def is_kill_switch_engaged(self) -> bool:
+        """Check if kill switch is engaged"""
+        with self._kill_switch_lock:
+            return self.kill_switch_engaged
+    
+    async def async_validate_order(
+        self,
+        symbol: str,
+        volume: float,
+        order_type: str,
+        account_info: Dict[str, Any],
+        current_positions: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Async wrapper for thread-safe order validation"""
+        async with self._async_lock:
+            return self.validate_order(symbol, volume, order_type, account_info, current_positions)
+    
+    async def async_update_pnl(self, pnl: float) -> None:
+        """Async wrapper for thread-safe P&L update"""
+        async with self._async_lock:
+            self.update_daily_pnl(pnl)
+    
     def emergency_stop(self, account_info: Dict[str, Any]) -> bool:
         """Check if emergency stop conditions are met"""
-        config = self.get_risk_config()
-        current_equity = account_info.get("equity", 0)
+        with self._state_lock:
+            config = self.get_risk_config()
+            current_equity = account_info.get("equity", 0)
 
-        # Emergency stop conditions
-        conditions = [
-            self.daily_pnl
-            < -(account_info.get("balance", 0) * (config.max_daily_loss * 1.5 / 100.0)),
-            (
-                (self.max_equity - current_equity) / self.max_equity * 100
-                > config.max_drawdown * 1.2
-                if self.max_equity > 0
-                else False
-            ),
-        ]
+            # Emergency stop conditions
+            conditions = [
+                self.daily_pnl
+                < -(account_info.get("balance", 0) * (config.max_daily_loss * 1.5 / 100.0)),
+                (
+                    (self.max_equity - current_equity) / self.max_equity * 100
+                    > config.max_drawdown * 1.2
+                    if self.max_equity > 0
+                    else False
+                ),
+            ]
 
-        if any(conditions):
-            logger.critical("EMERGENCY STOP CONDITIONS MET - TRADING HALTED")
-            return True
+            if any(conditions):
+                self._trigger_kill_switch("EMERGENCY STOP CONDITIONS MET")
+                return True
 
-        return False
+            return False
 
 
 # Global risk engine instance

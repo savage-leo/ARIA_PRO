@@ -13,6 +13,7 @@ from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from pathlib import Path
 import asyncio
+import threading
 from datetime import datetime, timedelta
 import numpy as np
 from urllib import request as _urlrequest
@@ -61,14 +62,15 @@ class PipelineRun:
 class CICDPipeline:
     """Automated CI/CD pipeline for model updates"""
     
-    def __init__(self, config: PipelineConfig = None):
+    def __init__(self, config: PipelineConfig = None, symbol: str = "EURUSD"):
         self.config = config or PipelineConfig()
+        self.symbol = symbol
         self.pipeline_history: List[PipelineRun] = []
         self.is_running = False
         self.scheduler_task = None
         
         # Pipeline components
-        self.trainer = MasterTrainer()
+        self.trainer = MasterTrainer(symbol=self.symbol)
         self.stress_tester = VolatilityStressTester()
         self.profiler = InferenceProfiler()
         
@@ -910,5 +912,21 @@ class CICDPipeline:
         return next_run_time if next_run_time > time.time() else None
 
 
-# Global CI/CD pipeline instance
-cicd_pipeline = CICDPipeline()
+# Lazy-loaded CI/CD pipeline singleton
+_cicd_pipeline: Optional[CICDPipeline] = None
+_cicd_lock = threading.RLock()
+
+def get_cicd_pipeline(symbol: str = "EURUSD") -> CICDPipeline:
+    """Return a singleton CICDPipeline instance, creating it lazily.
+
+    The first call can specify the desired symbol; subsequent calls return
+    the existing instance regardless of symbol. This defers heavy initialization
+    until first use and avoids import-time crashes.
+    """
+    global _cicd_pipeline
+    if _cicd_pipeline is None:
+        with _cicd_lock:
+            if _cicd_pipeline is None:
+                logger.info(f"Initializing CICDPipeline lazily (symbol={symbol})")
+                _cicd_pipeline = CICDPipeline(symbol=symbol)
+    return _cicd_pipeline

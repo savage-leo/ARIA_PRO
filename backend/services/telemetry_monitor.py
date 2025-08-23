@@ -15,6 +15,9 @@ import os
 
 logger = logging.getLogger(__name__)
 
+# Ensure the flag exists before any background thread might reference it
+PROMETHEUS_AVAILABLE = False
+
 
 @dataclass
 class PerformanceMetrics:

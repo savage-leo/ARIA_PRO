@@ -36,10 +36,18 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from urllib.parse import urlparse
 from backend.core.config import get_settings, Settings
 from backend.core.live_guard import enforce_live_only
-
+from backend.monitoring.llm_monitor import llm_monitor_service
+from backend.core.audit import get_audit_logger, AuditEventType
+from backend.core.health import get_health_checker
+from backend.core.rate_limit import get_rate_limiter, RateLimitMiddleware
+from backend.core.auth import get_current_user, require_admin, require_trader
+from backend.core.metrics import get_metrics_collector
+from fastapi import APIRouter, Depends, HTTPException, Response
+from datetime import datetime
 
 def _configure_logging(level_name: str) -> None:
     level_name = (level_name or "INFO").upper()
@@ -248,8 +256,12 @@ if _allowed_hosts:
 else:
     logger.warning("Trusted hosts not configured (ARIA_ALLOWED_HOSTS). Enforcement skipped.")
 
-# Strict CORS: require explicit ARIA_CORS_ORIGINS, no localhost defaults
+# Strict CORS: require explicit ARIA_CORS_ORIGINS, no permissive fallback
 _cors_origins = S.cors_origins_list
+if not _cors_origins:
+    logger.error("CORS: ARIA_CORS_ORIGINS must be configured for production. No cross-origin requests allowed.")
+    _cors_origins = []  # Explicitly deny all cross-origin requests
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -257,37 +269,157 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With", "X-ADMIN-KEY"],
 )
-if _cors_origins:
-    logger.info(f"CORS allow_origins: {_cors_origins}")
-else:
-    logger.warning("CORS: no origins configured (ARIA_CORS_ORIGINS). Cross-origin requests will be blocked.")
+logger.info(f"CORS configured with strict whitelist: {_cors_origins}")
 
 # Add strict security headers
 app.add_middleware(SecurityHeadersMiddleware)
 
-app.include_router(trading.router, prefix="/trading", tags=["Trading"])
-app.include_router(account.router, prefix="/account", tags=["Account"])
-app.include_router(market.router, prefix="/market", tags=["Market"])
-app.include_router(positions.router, prefix="/positions", tags=["Positions"])
-app.include_router(signals.router, prefix="/signals", tags=["Signals"])
-app.include_router(monitoring.router)  # router already has prefix /monitoring
-app.include_router(monitoring_enhanced.router)  # Enhanced institutional monitoring
-app.include_router(live_execution_api.router)  # Live MT5 execution API
-app.include_router(smc_routes.router)
-app.include_router(websocket.router, tags=["WebSocket"])
-app.include_router(debug.router)
-app.include_router(trade_memory_api.router)  # router defines its own prefix/tags
-app.include_router(analytics.router)
-app.include_router(institutional_ai.router)
-app.include_router(system_management.router)
-app.include_router(training.router)
-app.include_router(telemetry_api.router)
+# Add rate limiting middleware if enabled
+if S.RATE_LIMIT_ENABLED:
+    rate_limiter = get_rate_limiter()
+    app.add_middleware(RateLimitMiddleware, rate_limiter=rate_limiter)
+    logger.info(f"Rate limiting enabled: {S.RATE_LIMIT_REQUESTS_PER_MINUTE} req/min, burst={S.RATE_LIMIT_BURST}")
+else:
+    logger.info("Rate limiting disabled")
+
+app.include_router(trading.router, prefix="/trading", tags=["Trading"], include_in_schema=False)
+app.include_router(account.router, prefix="/account", tags=["Account"], include_in_schema=False)
+app.include_router(market.router, prefix="/market", tags=["Market"], include_in_schema=False)
+app.include_router(positions.router, prefix="/positions", tags=["Positions"], include_in_schema=False)
+app.include_router(signals.router, prefix="/signals", tags=["Signals"], include_in_schema=False)
+app.include_router(monitoring.router, include_in_schema=False)  # router already has prefix /monitoring
+app.include_router(monitoring_enhanced.router, include_in_schema=False)  # Enhanced institutional monitoring
+app.include_router(live_execution_api.router, include_in_schema=False)  # Live MT5 execution API
+app.include_router(smc_routes.router, include_in_schema=False)
+app.include_router(websocket.router, tags=["WebSocket"], include_in_schema=False)
+app.include_router(debug.router, include_in_schema=False)
+app.include_router(trade_memory_api.router, include_in_schema=False)  # router defines its own prefix/tags
+app.include_router(analytics.router, include_in_schema=False)
+app.include_router(institutional_ai.router, include_in_schema=False)
+app.include_router(system_management.router, include_in_schema=False)
+app.include_router(training.router, include_in_schema=False)
+app.include_router(telemetry_api.router, include_in_schema=False)
 from backend.routes.model_management import router as model_management_router
 from backend.routes.cicd_management import router as cicd_management_router
 from backend.routes.hot_swap_admin import router as hot_swap_admin_router
-app.include_router(model_management_router)
-app.include_router(cicd_management_router)
-app.include_router(hot_swap_admin_router)
+app.include_router(model_management_router, include_in_schema=False)
+app.include_router(cicd_management_router, include_in_schema=False)
+app.include_router(hot_swap_admin_router, include_in_schema=False)
+
+# Provide optional /api namespace for all endpoints (backward-compatible)
+api_router = APIRouter(prefix="/api")
+api_router.include_router(trading.router, prefix="/trading", tags=["Trading"])
+api_router.include_router(account.router, prefix="/account", tags=["Account"])
+api_router.include_router(market.router, prefix="/market", tags=["Market"])
+api_router.include_router(positions.router, prefix="/positions", tags=["Positions"])
+api_router.include_router(signals.router, prefix="/signals", tags=["Signals"])
+api_router.include_router(monitoring.router)
+api_router.include_router(monitoring_enhanced.router)
+api_router.include_router(live_execution_api.router)
+api_router.include_router(smc_routes.router)
+api_router.include_router(websocket.router, tags=["WebSocket"])
+api_router.include_router(debug.router)
+api_router.include_router(trade_memory_api.router)
+api_router.include_router(analytics.router)
+api_router.include_router(institutional_ai.router)
+api_router.include_router(system_management.router)
+api_router.include_router(training.router)
+api_router.include_router(telemetry_api.router)
+api_router.include_router(model_management_router)
+api_router.include_router(cicd_management_router)
+api_router.include_router(hot_swap_admin_router)
+
+@api_router.get("/health")
+async def api_health():
+    """Basic health check endpoint"""
+    health_checker = get_health_checker()
+    health_status = await health_checker.check_all()
+    
+    # Return 503 if unhealthy
+    if health_status["status"] == "unhealthy":
+        raise HTTPException(status_code=503, detail=health_status)
+    
+    return health_status
+
+@api_router.get("/ready")
+async def api_ready():
+    """Readiness check for load balancer"""
+    health_checker = get_health_checker()
+    readiness = await health_checker.readiness_check()
+    
+    if not readiness["ready"]:
+        raise HTTPException(status_code=503, detail=readiness)
+    
+    return readiness
+
+@api_router.get("/data-sources/status")
+def api_data_sources_status():
+    """Get status of all data sources (namespaced alias)."""
+    return data_source_manager.get_status()
+
+@api_router.get("/audit/recent")
+async def get_recent_audit_events(
+    event_type: str = None,
+    limit: int = 100,
+    current_user: dict = Depends(require_admin)
+):
+    """Get recent audit events (admin only)"""
+    audit_logger = get_audit_logger()
+    return audit_logger.get_recent_events(
+        event_type=event_type,
+        limit=limit
+    )
+
+@api_router.post("/audit/verify")
+async def verify_audit_integrity(
+    start_id: int = 1,
+    end_id: int = None,
+    current_user: dict = Depends(require_admin)
+):
+    """Verify audit log integrity (admin only)"""
+    audit_logger = get_audit_logger()
+    is_valid = audit_logger.verify_integrity(start_id, end_id)
+    return {"valid": is_valid, "range": {"start": start_id, "end": end_id}}
+
+@api_router.get("/metrics")
+async def get_prometheus_metrics():
+    """Prometheus metrics endpoint"""
+    metrics_collector = get_metrics_collector()
+    
+    # Update MT5 metrics if connected
+    try:
+        if S.mt5_enabled:
+            import MetaTrader5 as mt5
+            if mt5.initialize():
+                account_info = mt5.account_info()
+                if account_info:
+                    metrics_collector.update_mt5_metrics(
+                        connected=True,
+                        balance=account_info.balance,
+                        equity=account_info.equity,
+                        margin=account_info.margin
+                    )
+                else:
+                    metrics_collector.update_mt5_metrics(connected=False)
+                mt5.shutdown()
+            else:
+                metrics_collector.update_mt5_metrics(connected=False)
+    except:
+        metrics_collector.update_mt5_metrics(connected=False)
+    
+    # Update auto-trader metrics
+    if auto_trader:
+        metrics_collector.update_auto_trader_status(auto_trader.running)
+    
+    # Generate Prometheus format metrics
+    metrics_data = metrics_collector.get_metrics()
+    
+    return Response(
+        content=metrics_data,
+        media_type="text/plain; version=0.0.4"
+    )
+
+app.include_router(api_router)
 
 # Register data sources
 # Enforce MT5-only live feed; no simulated fallback
@@ -325,8 +457,46 @@ except Exception as e:
 
 @app.on_event("startup")
 async def startup_event():
-    """Start data sources when the application starts"""
+    """Start data sources when the application starts with production checks"""
     logger.info("Starting ARIA PRO backend...")
+    
+    # Log system startup in audit trail
+    audit_logger = get_audit_logger()
+    audit_logger.log_event(
+        event_type=AuditEventType.SYSTEM_START,
+        action="System startup initiated",
+        details={"version": "1.2.0", "environment": "production"}
+    )
+    
+    # Run fail-fast health checks for critical components
+    health_checker = get_health_checker()
+    try:
+        # Check MT5 if enabled - FAIL FAST
+        if S.mt5_enabled:
+            mt5_health = await health_checker.check_mt5_connection()
+            if mt5_health.status == "unhealthy":
+                logger.critical(f"MT5 connection failed at startup: {mt5_health.error_message}")
+                raise RuntimeError(f"Cannot start: MT5 required but unavailable - {mt5_health.error_message}")
+        
+        # Check required models - FAIL FAST
+        if S.AUTO_TRADE_ENABLED:
+            models_health = await health_checker.check_models()
+            if models_health.status == "unhealthy":
+                logger.critical(f"Required models missing at startup: {models_health.error_message}")
+                raise RuntimeError(f"Cannot start: {models_health.error_message}")
+    except Exception as e:
+        audit_logger.log_event(
+            event_type=AuditEventType.SYSTEM_STOP,
+            action="Startup failed - critical component unavailable",
+            details={"error": str(e)}
+        )
+        raise
+    
+    # Start rate limiter cleanup task
+    if S.RATE_LIMIT_ENABLED:
+        rate_limiter = get_rate_limiter()
+        rate_limiter.start_cleanup_task()
+    
     try:
         # Log a concise configuration snapshot (no secrets)
         cfg = {
@@ -383,38 +553,196 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Stop data sources when the application shuts down"""
-    logger.info("Shutting down ARIA PRO backend...")
+    """Graceful shutdown of all background tasks and services"""
+    logger.info("Initiating graceful shutdown of ARIA PRO backend...")
+    
+    # Log system shutdown in audit trail
+    audit_logger = get_audit_logger()
+    audit_logger.log_event(
+        event_type=AuditEventType.SYSTEM_STOP,
+        action="System shutdown initiated",
+        details={"reason": "normal_shutdown"}
+    )
+    
+    shutdown_tasks = []
+    
     try:
-        # Stop AutoTrader first
+        # 1. Stop rate limiter cleanup task
+        if S.RATE_LIMIT_ENABLED:
+            try:
+                rate_limiter = get_rate_limiter()
+                rate_limiter.stop_cleanup_task()
+                logger.info("Rate limiter cleanup stopped")
+            except Exception as e:
+                logger.error(f"Error stopping rate limiter: {e}")
+
+        # 2. Stop AutoTrader and cancel its task
         try:
             await auto_trader.stop()
             task = getattr(app.state, "auto_trader_task", None)
-            if task:
+            if task and not task.done():
                 task.cancel()
+                shutdown_tasks.append(task)
+            logger.info("AutoTrader stopped")
         except Exception as e:
             logger.error(f"Error stopping AutoTrader: {e}")
 
-        # Stop Performance Monitor logger task
+        # 3. Stop Performance Monitor logger task
         try:
             ptask = getattr(app.state, "perf_log_task", None)
-            if ptask:
+            if ptask and not ptask.done():
                 ptask.cancel()
+                shutdown_tasks.append(ptask)
+            logger.info("Performance monitor stopped")
         except Exception as e:
-            logger.error(f"Error stopping PerformanceMonitor logger: {e}")
+            logger.error(f"Error stopping PerformanceMonitor: {e}")
 
-        await data_source_manager.stop_all()
-        logger.info("Data sources stopped successfully")
+        # 4. Stop all data sources (MT5, WebSocket broadcaster, etc.)
+        try:
+            await data_source_manager.stop_all()
+            logger.info("Data sources stopped")
+        except Exception as e:
+            logger.error(f"Error stopping data sources: {e}")
+
+        # 5. Wait for all cancelled tasks to complete
+        if shutdown_tasks:
+            try:
+                await asyncio.gather(*shutdown_tasks, return_exceptions=True)
+                logger.info("All background tasks cancelled")
+            except Exception as e:
+                logger.error(f"Error waiting for task cancellation: {e}")
+
+        # 6. Close MT5 connection gracefully
+        try:
+            import MetaTrader5 as mt5
+            if mt5.terminal_info() is not None:
+                mt5.shutdown()
+                logger.info("MT5 connection closed")
+        except Exception as e:
+            logger.error(f"Error closing MT5: {e}")
+
+        # 7. Flush all logs
+        try:
+            for handler in logging.getLogger().handlers:
+                if hasattr(handler, 'flush'):
+                    handler.flush()
+            logger.info("Log buffers flushed")
+        except Exception as e:
+            logger.error(f"Error flushing logs: {e}")
+
+        logger.info("Graceful shutdown completed successfully")
+        
     except Exception as e:
-        logger.error(f"Error stopping data sources: {e}")
+        logger.error(f"Error during shutdown: {e}")
+        # Force audit log entry for failed shutdown
+        try:
+            audit_logger.log_event(
+                event_type=AuditEventType.SYSTEM_STOP,
+                action="Shutdown failed",
+                details={"error": str(e)}
+            )
+        except:
+            pass
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+@app.get("/health", include_in_schema=False)
+async def health():
+    """Enhanced health check with MT5 connectivity and model status"""
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "checks": {}
+    }
+    
+    # Check MT5 connectivity
+    try:
+        from backend.services.mt5_executor import mt5_executor
+        mt5_connected = mt5_executor.is_connected()
+        health_status["checks"]["mt5"] = {
+            "status": "connected" if mt5_connected else "disconnected",
+            "healthy": mt5_connected
+        }
+        if not mt5_connected:
+            health_status["status"] = "degraded"
+    except Exception as e:
+        health_status["checks"]["mt5"] = {
+            "status": "error",
+            "healthy": False,
+            "error": str(e)
+        }
+        health_status["status"] = "unhealthy"
+    
+    # Check AutoTrader status
+    try:
+        auto_trader_status = auto_trader.get_status()
+        health_status["checks"]["auto_trader"] = {
+            "status": "running" if auto_trader_status.get("running") else "stopped",
+            "healthy": True,
+            "circuit_breaker": auto_trader_status.get("circuit_breaker_active", False)
+        }
+        if auto_trader_status.get("circuit_breaker_active"):
+            health_status["status"] = "degraded"
+    except Exception as e:
+        health_status["checks"]["auto_trader"] = {
+            "status": "error",
+            "healthy": False,
+            "error": str(e)
+        }
+    
+    # Check Risk Engine kill switch
+    try:
+        from backend.services.risk_engine import risk_engine
+        kill_switch = risk_engine.is_kill_switch_engaged()
+        health_status["checks"]["risk_engine"] = {
+            "status": "active" if not kill_switch else "kill_switch_engaged",
+            "healthy": not kill_switch
+        }
+        if kill_switch:
+            health_status["status"] = "unhealthy"
+    except Exception as e:
+        health_status["checks"]["risk_engine"] = {
+            "status": "error",
+            "healthy": False,
+            "error": str(e)
+        }
+    
+    # Check model loading status
+    try:
+        from backend.core.model_loader import get_model_loader
+        loader = get_model_loader()
+        models_loaded = len(loader._models) > 0
+        health_status["checks"]["models"] = {
+            "status": "loaded" if models_loaded else "not_loaded",
+            "healthy": models_loaded,
+            "count": len(loader._models)
+        }
+    except Exception as e:
+        health_status["checks"]["models"] = {
+            "status": "error",
+            "healthy": False,
+            "error": str(e)
+        }
+    
+    # Check WebSocket connections
+    try:
+        from backend.services.ws_broadcaster import ws_broadcaster
+        ws_count = len(ws_broadcaster.clients)
+        health_status["checks"]["websocket"] = {
+            "status": "active",
+            "healthy": True,
+            "client_count": ws_count
+        }
+    except Exception as e:
+        health_status["checks"]["websocket"] = {
+            "status": "error",
+            "healthy": False,
+            "error": str(e)
+        }
+    
+    return health_status
 
 
-@app.get("/data-sources/status")
+@app.get("/data-sources/status", include_in_schema=False)
 def get_data_sources_status():
     """Get status of all data sources"""
     return data_source_manager.get_status()

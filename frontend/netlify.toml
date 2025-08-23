@@ -12,16 +12,3 @@
   to = "/index.html"
   status = 200
 
-# ✅ API proxying to FastAPI backend
-[[redirects]]
-  from = "/api/*"
-  to = "http://127.0.0.1:8000/:splat"
-  status = 200
-  force = true
-
-# ✅ WebSocket proxying
-[[redirects]]
-  from = "/ws/*"
-  to = "ws://127.0.0.1:8000/:splat"
-  status = 200
-  force = true

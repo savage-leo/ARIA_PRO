@@ -1,0 +1,68 @@
+# Multi-stage production Dockerfile for ARIA Pro
+# Security-hardened with non-root user and minimal attack surface
+
+# Build stage
+FROM python:3.11-slim as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    make \
+    cmake \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create build user
+RUN useradd --create-home --shell /bin/bash builder
+USER builder
+WORKDIR /home/builder
+
+# Copy requirements and install dependencies
+COPY --chown=builder:builder requirements.txt .
+RUN pip install --user --no-cache-dir -r requirements.txt
+
+# Production stage
+FROM python:3.11-slim
+
+# Install runtime dependencies only
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create non-root user for application
+RUN useradd --create-home --shell /bin/bash --uid 1001 aria \
+    && mkdir -p /app/data /app/logs \
+    && chown -R aria:aria /app
+
+# Copy Python packages from builder
+COPY --from=builder /home/builder/.local /home/aria/.local
+ENV PATH=/home/aria/.local/bin:$PATH
+
+# Switch to non-root user
+USER aria
+WORKDIR /app
+
+# Copy application code (excluding sensitive files via .dockerignore)
+COPY --chown=aria:aria backend/ ./backend/
+COPY --chown=aria:aria *.py ./
+
+# Create required directories
+RUN mkdir -p data logs
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Security: Run as non-root, expose minimal port
+EXPOSE 8000
+
+# Production command with proper signal handling
+CMD ["python", "-m", "uvicorn", "backend.main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "1", \
+     "--access-log", \
+     "--log-config", "logging.conf"]

@@ -1,0 +1,55 @@
+name: Security Analysis
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  security-analysis:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 mypy bandit safety
+        if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
+    
+    - name: Lint with flake8
+      run: |
+        # Stop build if syntax errors or undefined names
+        flake8 backend/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Treat all other issues as warnings
+        flake8 backend/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: Type check with mypy
+      run: |
+        mypy backend/ --ignore-missing-imports --no-strict-optional --allow-untyped-defs
+    
+    - name: Security scan with bandit
+      run: |
+        bandit -r backend/ -f json -o bandit-report.json || true
+        bandit -r backend/ --severity-level medium
+    
+    - name: Check for known vulnerabilities
+      run: |
+        safety check --json --output safety-report.json || true
+        safety check
+    
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+          safety-report.json

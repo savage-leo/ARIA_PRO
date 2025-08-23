@@ -7,21 +7,23 @@ from __future__ import annotations
 import os
 import logging
 from typing import List, Optional
+from datetime import timedelta
 
 logger = logging.getLogger(__name__)
 
 # Try Pydantic v2 (pydantic-settings) first, then fallback to v1 BaseSettings
 try:
     from pydantic_settings import BaseSettings as _BaseSettings  # type: ignore
-    from pydantic import Field  # type: ignore
+    from pydantic import Field, validator  # type: ignore
     _V2 = True
 except Exception:
     try:
-        from pydantic import BaseSettings as _BaseSettings, Field  # type: ignore
+        from pydantic import BaseSettings as _BaseSettings, Field, validator  # type: ignore
         _V2 = False
     except Exception:
         _BaseSettings = None  # type: ignore
         Field = None  # type: ignore
+        validator = None  # type: ignore
         _V2 = False
 
 
@@ -131,6 +133,69 @@ if _BaseSettings is not None:
         LLM_TUNING_ENABLED: bool = Field(default=False, env="LLM_TUNING_ENABLED")
         LLM_TUNING_MAX_REL_DELTA: float = Field(default=0.2, env="LLM_TUNING_MAX_REL_DELTA")
         LLM_TUNING_COOLDOWN_SEC: int = Field(default=300, env="LLM_TUNING_COOLDOWN_SEC")
+        
+        # JWT Authentication settings
+        JWT_SECRET_KEY: str = Field(default="", env="JWT_SECRET_KEY")
+        JWT_ALGORITHM: str = Field(default="HS256", env="JWT_ALGORITHM")
+        JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, env="JWT_ACCESS_TOKEN_EXPIRE_MINUTES")
+        JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, env="JWT_REFRESH_TOKEN_EXPIRE_DAYS")
+        JWT_ENABLED: bool = Field(default=False, env="JWT_ENABLED")
+        
+        # Rate limiting - Production defaults
+        RATE_LIMIT_ENABLED: bool = Field(default=True, env="RATE_LIMIT_ENABLED")
+        RATE_LIMIT_REQUESTS_PER_MINUTE: int = Field(default=200, env="RATE_LIMIT_REQUESTS_PER_MINUTE")
+        RATE_LIMIT_BURST: int = Field(default=50, env="RATE_LIMIT_BURST")
+        RATE_LIMIT_ADMIN_PER_MINUTE: int = Field(default=60, env="RATE_LIMIT_ADMIN_PER_MINUTE")
+        RATE_LIMIT_TRADING_PER_MINUTE: int = Field(default=30, env="RATE_LIMIT_TRADING_PER_MINUTE")
+        
+        # Auto-trade thresholds
+        AUTO_TRADE_PROB_THRESHOLD: float = Field(default=0.75, env="AUTO_TRADE_PROB_THRESHOLD")
+        AUTO_TRADE_STOP_LOSS_ATR: float = Field(default=1.5, env="AUTO_TRADE_STOP_LOSS_ATR")
+        AUTO_TRADE_TAKE_PROFIT_ATR: float = Field(default=3.0, env="AUTO_TRADE_TAKE_PROFIT_ATR")
+        AUTO_TRADE_MAX_RISK_PERCENT: float = Field(default=0.5, env="AUTO_TRADE_MAX_RISK_PERCENT")
+        
+        # Validators for production safety
+        @validator('AUTO_TRADE_PROB_THRESHOLD')
+        def validate_prob_threshold(cls, v):
+            if not 0 <= v <= 1:
+                raise ValueError('AUTO_TRADE_PROB_THRESHOLD must be between 0 and 1')
+            return v
+        
+        @validator('AUTO_TRADE_STOP_LOSS_ATR', 'AUTO_TRADE_TAKE_PROFIT_ATR')
+        def validate_atr_multipliers(cls, v):
+            if not 0.1 <= v <= 10:
+                raise ValueError('ATR multipliers must be between 0.1 and 10')
+            return v
+        
+        @validator('AUTO_TRADE_MAX_RISK_PERCENT')
+        def validate_max_risk(cls, v):
+            if not 0.01 <= v <= 5:
+                raise ValueError('MAX_RISK_PERCENT must be between 0.01 and 5')
+            return v
+        
+        @validator('LLM_TUNING_MAX_REL_DELTA')
+        def validate_tuning_delta(cls, v):
+            if not 0 <= v <= 1:
+                raise ValueError('LLM_TUNING_MAX_REL_DELTA must be between 0 and 1')
+            return v
+        
+        @validator('RATE_LIMIT_REQUESTS_PER_MINUTE')
+        def validate_rate_limit(cls, v):
+            if not 1 <= v <= 10000:
+                raise ValueError('RATE_LIMIT_REQUESTS_PER_MINUTE must be between 1 and 10000')
+            return v
+        
+        @validator('JWT_ACCESS_TOKEN_EXPIRE_MINUTES')
+        def validate_jwt_expiry(cls, v):
+            if not 1 <= v <= 1440:  # Max 24 hours
+                raise ValueError('JWT_ACCESS_TOKEN_EXPIRE_MINUTES must be between 1 and 1440')
+            return v
+        
+        @validator('MT5_LOGIN')
+        def validate_mt5_login(cls, v, values):
+            if values.get('ARIA_ENABLE_MT5') and not v:
+                logger.warning('MT5 enabled but MT5_LOGIN not configured')
+            return v
 
         # Convenience accessors
         @property
@@ -182,6 +247,14 @@ if _BaseSettings is not None:
         @property
         def include_xgb(self) -> bool:
             return bool(self.ARIA_INCLUDE_XGB)
+        
+        @property
+        def jwt_access_expire(self) -> timedelta:
+            return timedelta(minutes=self.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+        
+        @property
+        def jwt_refresh_expire(self) -> timedelta:
+            return timedelta(days=self.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
 
 else:
 
