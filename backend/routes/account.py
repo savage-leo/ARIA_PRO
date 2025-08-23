@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 import logging
 from backend.services.mt5_executor import mt5_executor
+from backend.core.redis_cache import get_cache_manager
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -9,9 +10,20 @@ logger = logging.getLogger(__name__)
 @router.get("/info")
 async def get_account_info():
     """Get MT5 account information"""
+    cache_manager = get_cache_manager()
+    
+    # Try cache first
+    cached_info = await cache_manager.get_account_info("mt5_account")
+    if cached_info:
+        return {**cached_info, "cached": True}
+    
     try:
         account_info = mt5_executor.get_account_info()
-        return account_info
+        
+        # Cache the result
+        await cache_manager.cache_account_info("mt5_account", account_info)
+        
+        return {**account_info, "cached": False}
     except Exception as e:
         logger.warning(f"MT5 unavailable for account info: {str(e)}")
         return {
@@ -24,9 +36,28 @@ async def get_account_info():
 @router.get("/balance")
 async def get_balance():
     """Get account balance"""
+    cache_manager = get_cache_manager()
+    
+    # Try cache first
+    cached_info = await cache_manager.get_account_info("mt5_account")
+    if cached_info and "balance" in cached_info:
+        return {
+            "balance": cached_info["balance"], 
+            "equity": cached_info["equity"],
+            "cached": True
+        }
+    
     try:
         account_info = mt5_executor.get_account_info()
-        return {"balance": account_info["balance"], "equity": account_info["equity"]}
+        
+        # Cache the result
+        await cache_manager.cache_account_info("mt5_account", account_info)
+        
+        return {
+            "balance": account_info["balance"], 
+            "equity": account_info["equity"],
+            "cached": False
+        }
     except Exception as e:
         logger.warning(f"MT5 unavailable for balance: {str(e)}")
         return {

@@ -227,3 +227,48 @@ def create_tokens_for_user(user: UserInDB) -> Token:
         access_token=access_token,
         refresh_token=refresh_token
     )
+
+def verify_refresh_token(token: str) -> Optional[Dict[str, Any]]:
+    """Verify and decode refresh token"""
+    settings = get_settings()
+    
+    try:
+        secret_key = settings.JWT_SECRET_KEY or "CHANGE_THIS_SECRET_KEY_IN_PRODUCTION_ARIA_2024"
+        payload = jwt.decode(token, secret_key, algorithms=[settings.JWT_ALGORITHM])
+        
+        # Verify token type
+        if payload.get("type") != "refresh":
+            return None
+        
+        return payload
+    except jwt.PyJWTError:
+        return None
+
+def refresh_access_token(refresh_token: str) -> Optional[Token]:
+    """Generate new access token from refresh token"""
+    payload = verify_refresh_token(refresh_token)
+    if not payload:
+        return None
+    
+    username = payload.get("sub")
+    if not username:
+        return None
+    
+    user = get_user(username)
+    if not user or user.disabled:
+        return None
+    
+    # Create new access token with same data
+    access_token_data = {
+        "sub": user.username,
+        "roles": [role.value for role in user.roles],
+        "scopes": []
+    }
+    
+    new_access_token = create_access_token(access_token_data)
+    
+    return Token(
+        access_token=new_access_token,
+        refresh_token=refresh_token,  # Keep same refresh token
+        token_type="bearer"
+    )

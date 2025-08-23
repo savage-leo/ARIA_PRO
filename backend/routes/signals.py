@@ -2,7 +2,9 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any
+from datetime import datetime
 from backend.services.data_source_manager import FeedUnavailableError
+from backend.core.redis_cache import get_cache_manager
 
 router = APIRouter()
 # Use global data source manager
@@ -17,7 +19,14 @@ class GenerateSignalReq(BaseModel):
 
 
 @router.post("/generate")
-def generate_signals(req: GenerateSignalReq):
+async def generate_signals(req: GenerateSignalReq):
+    cache_manager = get_cache_manager()
+    
+    # Try cache first
+    cached_signal = await cache_manager.get_ai_signal(req.symbol)
+    if cached_signal:
+        return {"ok": True, "signals": cached_signal, "cached": True}
+    
     try:
         # Enforce MT5-only; build features with timeframe and bars
         feats: Dict[str, Any] = dict(req.features or {})
@@ -25,7 +34,11 @@ def generate_signals(req: GenerateSignalReq):
         feats["bars"] = req.bars
 
         signals = data_manager.get_ai_signals(req.symbol, feats)
-        return {"ok": True, "signals": signals}
+        
+        # Cache the result
+        await cache_manager.cache_ai_signal(req.symbol, signals, datetime.now())
+        
+        return {"ok": True, "signals": signals, "cached": False}
     except FeedUnavailableError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:

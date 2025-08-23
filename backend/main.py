@@ -15,6 +15,7 @@ from backend.routes import (
     trade_memory_api,
     analytics,
     model_management,
+    auth,
 )
 from backend.routes import (
     monitoring_enhanced,
@@ -46,6 +47,7 @@ from backend.core.health import get_health_checker
 from backend.core.rate_limit import get_rate_limiter, RateLimitMiddleware
 from backend.core.auth import get_current_user, require_admin, require_trader
 from backend.core.metrics import get_metrics_collector
+from backend.core.error_handler import ErrorBoundaryMiddleware
 from fastapi import APIRouter, Depends, HTTPException, Response
 from datetime import datetime
 
@@ -63,7 +65,22 @@ def _configure_logging(level_name: str) -> None:
 
     root = logging.getLogger()
     if not root.hasHandlers():
-        logging.basicConfig(level=level)
+        # Configure basic logging with UTF-8 encoding for Windows compatibility
+        logging.basicConfig(
+            level=level,
+            format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+            handlers=[
+                logging.StreamHandler()
+            ]
+        )
+        # Force UTF-8 encoding on console handler for Windows
+        for handler in root.handlers:
+            if isinstance(handler, logging.StreamHandler) and hasattr(handler.stream, 'reconfigure'):
+                try:
+                    handler.stream.reconfigure(encoding='utf-8')
+                except:
+                    pass
     root.setLevel(level)
 
     # align common server loggers as well
@@ -96,7 +113,7 @@ def _configure_file_logging(log_dir: str) -> None:
 
         if info_path not in existing_paths:
             fh_info = RotatingFileHandler(
-                info_path, maxBytes=5_000_000, backupCount=3, encoding="utf-8"
+                info_path, maxBytes=10_000_000, backupCount=5, encoding="utf-8"
             )
             fh_info.setLevel(logging.INFO)
             fh_info.setFormatter(formatter)
@@ -104,7 +121,7 @@ def _configure_file_logging(log_dir: str) -> None:
 
         if err_path not in existing_paths:
             fh_err = RotatingFileHandler(
-                err_path, maxBytes=5_000_000, backupCount=3, encoding="utf-8"
+                err_path, maxBytes=10_000_000, backupCount=5, encoding="utf-8"
             )
             fh_err.setLevel(logging.ERROR)
             fh_err.setFormatter(formatter)
@@ -274,14 +291,22 @@ logger.info(f"CORS configured with strict whitelist: {_cors_origins}")
 # Add strict security headers
 app.add_middleware(SecurityHeadersMiddleware)
 
+# Add comprehensive error boundary middleware
+app.add_middleware(ErrorBoundaryMiddleware)
+
 # Add rate limiting middleware if enabled
-if S.RATE_LIMIT_ENABLED:
-    rate_limiter = get_rate_limiter()
-    app.add_middleware(RateLimitMiddleware, rate_limiter=rate_limiter)
-    logger.info(f"Rate limiting enabled: {S.RATE_LIMIT_REQUESTS_PER_MINUTE} req/min, burst={S.RATE_LIMIT_BURST}")
-else:
+try:
+    if hasattr(S, 'RATE_LIMIT_ENABLED') and S.RATE_LIMIT_ENABLED:
+        rate_limiter = get_rate_limiter()
+        app.add_middleware(RateLimitMiddleware, rate_limiter=rate_limiter)
+        logger.info(f"Rate limiting enabled: {getattr(S, 'RATE_LIMIT_REQUESTS_PER_MINUTE', 60)} req/min")
+    else:
+        logger.info("Rate limiting disabled")
+except Exception as e:
+    logger.warning(f"Rate limiting configuration issue: {e}")
     logger.info("Rate limiting disabled")
 
+app.include_router(auth.router, include_in_schema=False)
 app.include_router(trading.router, prefix="/trading", tags=["Trading"], include_in_schema=False)
 app.include_router(account.router, prefix="/account", tags=["Account"], include_in_schema=False)
 app.include_router(market.router, prefix="/market", tags=["Market"], include_in_schema=False)
@@ -308,6 +333,7 @@ app.include_router(hot_swap_admin_router, include_in_schema=False)
 
 # Provide optional /api namespace for all endpoints (backward-compatible)
 api_router = APIRouter(prefix="/api")
+api_router.include_router(auth.router)
 api_router.include_router(trading.router, prefix="/trading", tags=["Trading"])
 api_router.include_router(account.router, prefix="/account", tags=["Account"])
 api_router.include_router(market.router, prefix="/market", tags=["Market"])
@@ -328,6 +354,28 @@ api_router.include_router(telemetry_api.router)
 api_router.include_router(model_management_router)
 api_router.include_router(cicd_management_router)
 api_router.include_router(hot_swap_admin_router)
+
+# Add cache management router
+from backend.routes.cache_management import router as cache_management_router
+api_router.include_router(cache_management_router)
+
+# Add Prometheus metrics router
+from backend.routes.prometheus_endpoints import router as prometheus_router
+api_router.include_router(prometheus_router)
+
+# Add alerting system router
+from backend.routes.alerting_endpoints import router as alerting_router
+api_router.include_router(alerting_router)
+
+# Add WebSocket management router
+from backend.routes.websocket_management import router as websocket_mgmt_router
+api_router.include_router(websocket_mgmt_router)
+
+# Add WebSocket endpoint
+from backend.routes.websocket_endpoint import router as websocket_router
+app.include_router(websocket_router)
+
+app.include_router(api_router)
 
 @api_router.get("/health")
 async def api_health():
@@ -524,8 +572,43 @@ async def startup_event():
         except Exception as e:
             logger.error(f"Failed to register LLMMonitorService: {e}")
 
-        # Start data sources in background
-        asyncio.create_task(data_source_manager.start_all())
+        # Initialize Redis cache
+        logger.info("Initializing Redis cache...")
+        from backend.core.redis_cache import get_redis_cache
+        redis_cache = get_redis_cache()
+        await redis_cache.connect()
+        
+        # Initialize Prometheus metrics
+        logger.info("Starting Prometheus metrics collection...")
+        from backend.core.prometheus_metrics import get_metrics_collector
+        metrics_collector = get_metrics_collector()
+        await metrics_collector.start()
+        
+        # Initialize alerting system
+        logger.info("Starting alerting system...")
+        from backend.core.alerting_system import get_alerting_system
+        alerting_system = get_alerting_system()
+        await alerting_system.start()
+        logger.info("Alerting system started")
+        
+        # Initialize WebSocket pool
+        from backend.core.websocket_pool import get_websocket_pool
+        websocket_pool = get_websocket_pool()
+        await websocket_pool.start()
+        logger.info("WebSocket pool started")
+        
+        # Start periodic WebSocket broadcasting
+        from backend.routes.websocket_endpoint import start_periodic_broadcast
+        await start_periodic_broadcast()
+        
+        # Initialize system monitor
+        from backend.core.system_monitor import get_system_monitor
+        system_monitor = get_system_monitor()
+        await system_monitor.start_monitoring()
+        
+        # Initialize data sources
+        logger.info("Initializing data sources...")
+        await data_source_manager.start_all()
         logger.info("Data sources started successfully")
 
         # Optionally start AutoTrader if enabled via env
@@ -567,44 +650,71 @@ async def shutdown_event():
     shutdown_tasks = []
     
     try:
-        # 1. Stop rate limiter cleanup task
-        if S.RATE_LIMIT_ENABLED:
-            try:
-                rate_limiter = get_rate_limiter()
-                rate_limiter.stop_cleanup_task()
-                logger.info("Rate limiter cleanup stopped")
-            except Exception as e:
-                logger.error(f"Error stopping rate limiter: {e}")
-
-        # 2. Stop AutoTrader and cancel its task
+        # 1. Stop WebSocket broadcasting
+        logger.info("Stopping WebSocket broadcasting...")
         try:
-            await auto_trader.stop()
-            task = getattr(app.state, "auto_trader_task", None)
-            if task and not task.done():
-                task.cancel()
-                shutdown_tasks.append(task)
-            logger.info("AutoTrader stopped")
+            from backend.routes.websocket_endpoint import stop_periodic_broadcast
+            await stop_periodic_broadcast()
+        except Exception as e:
+            logger.error(f"Error stopping WebSocket broadcasting: {e}")
+        
+        # 2. Stop WebSocket pool
+        logger.info("Stopping WebSocket pool...")
+        try:
+            from backend.core.websocket_pool import get_websocket_pool
+            websocket_pool = get_websocket_pool()
+            await websocket_pool.stop()
+            logger.info("WebSocket pool stopped")
+        except Exception as e:
+            logger.error(f"Error stopping WebSocket pool: {e}")
+        
+        # 3. Stop alerting system
+        logger.info("Stopping alerting system...")
+        try:
+            from backend.core.alerting_system import get_alerting_system
+            alerting_system = get_alerting_system()
+            await alerting_system.stop()
+            logger.info("Alerting system stopped")
+        except Exception as e:
+            logger.error(f"Error stopping alerting system: {e}")
+        
+        # 4. Stop Prometheus metrics collection
+        logger.info("Stopping Prometheus metrics collection...")
+        try:
+            from backend.core.prometheus_metrics import get_metrics_collector
+            metrics_collector = get_metrics_collector()
+            await metrics_collector.stop()
+            logger.info("Prometheus metrics collection stopped")
+        except Exception as e:
+            logger.error(f"Error stopping Prometheus metrics: {e}")
+        
+        # 5. Disconnect Redis cache
+        logger.info("Disconnecting Redis cache...")
+        try:
+            from backend.core.redis_cache import get_redis_cache
+            redis_cache = get_redis_cache()
+            await redis_cache.disconnect()
+            logger.info("Redis cache disconnected")
+        except Exception as e:
+            logger.error(f"Error disconnecting Redis cache: {e}")
+        
+        # 6. Stop AutoTrader if running
+        try:
+            if hasattr(app.state, 'auto_trader_task') and app.state.auto_trader_task:
+                app.state.auto_trader_task.cancel()
+                shutdown_tasks.append(app.state.auto_trader_task)
         except Exception as e:
             logger.error(f"Error stopping AutoTrader: {e}")
-
-        # 3. Stop Performance Monitor logger task
+        
+        # 7. Stop data sources
         try:
-            ptask = getattr(app.state, "perf_log_task", None)
-            if ptask and not ptask.done():
-                ptask.cancel()
-                shutdown_tasks.append(ptask)
-            logger.info("Performance monitor stopped")
-        except Exception as e:
-            logger.error(f"Error stopping PerformanceMonitor: {e}")
-
-        # 4. Stop all data sources (MT5, WebSocket broadcaster, etc.)
-        try:
+            data_source_manager = get_data_source_manager()
             await data_source_manager.stop_all()
             logger.info("Data sources stopped")
         except Exception as e:
             logger.error(f"Error stopping data sources: {e}")
 
-        # 5. Wait for all cancelled tasks to complete
+        # 8. Wait for all cancelled tasks to complete
         if shutdown_tasks:
             try:
                 await asyncio.gather(*shutdown_tasks, return_exceptions=True)
@@ -612,7 +722,7 @@ async def shutdown_event():
             except Exception as e:
                 logger.error(f"Error waiting for task cancellation: {e}")
 
-        # 6. Close MT5 connection gracefully
+        # 9. Close MT5 connection gracefully
         try:
             import MetaTrader5 as mt5
             if mt5.terminal_info() is not None:
@@ -621,7 +731,7 @@ async def shutdown_event():
         except Exception as e:
             logger.error(f"Error closing MT5: {e}")
 
-        # 7. Flush all logs
+        # 10. Flush all logs
         try:
             for handler in logging.getLogger().handlers:
                 if hasattr(handler, 'flush'):
