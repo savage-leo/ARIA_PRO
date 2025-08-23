@@ -2,12 +2,10 @@ services:
   - type: web
     name: aria-backend
     env: python
-    buildCommand: pip install -r production_requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
+    buildCommand: pip install -r ARIA_PRO/backend/production_requirements.txt
+    startCommand: uvicorn ARIA_PRO.backend.main:app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /health
     envVars:
       - key: PYTHONPATH
-        value: /opt/render/project/src
-      - key: PORT
-        value: 8000
-    autoDeploy: false
+        value: /opt/render/project/src/ARIA_PRO:/opt/render/project/src
+    autoDeploy: true
