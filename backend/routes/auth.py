@@ -3,7 +3,7 @@ Authentication endpoints for ARIA Pro
 JWT token management with refresh token support
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from typing import Optional
@@ -32,7 +32,10 @@ class TokenResponse(BaseModel):
     expires_in: int = 3600
 
 @router.post("/token", response_model=TokenResponse)
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+async def login_for_access_token(
+    response: Response,
+    form_data: OAuth2PasswordRequestForm = Depends()
+):
     """
     OAuth2 compatible token login, get an access token for future requests
     """
@@ -46,6 +49,16 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     
     tokens = create_tokens_for_user(user)
     logger.info(f"User {user.username} authenticated successfully")
+    
+    # Set secure HTTP-only cookies for tokens
+    response.set_cookie(
+        key="refresh_token",
+        value=tokens.refresh_token,
+        httponly=True,
+        secure=True,  # HTTPS only
+        samesite="strict",
+        max_age=7 * 24 * 3600  # 7 days
+    )
     
     return TokenResponse(
         access_token=tokens.access_token,

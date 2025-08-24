@@ -1,5 +1,7 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from backend.services.ws_broadcaster import broadcaster
+from backend.core.config import get_settings
+from backend.core.auth import verify_refresh_token
 import json
 import logging
 import os
@@ -25,31 +27,48 @@ async def websocket_endpoint(websocket: WebSocket):
         # Do not fail the connection on header access issues
         pass
 
-    # Optional token auth via env. If ARIA_WS_TOKEN present, require header/query token.
-    try:
-        required_token = (
-            os.environ.get("ARIA_WS_TOKEN")
-            or os.environ.get("ARIA_ADMIN_KEY")
-            or os.environ.get("ADMIN_API_KEY")
-        )
-        provided_token = (
-            websocket.query_params.get("token")
-            or websocket.headers.get("X-ARIA-TOKEN")
-            or websocket.headers.get("X-ARIA-ADMIN")
-        )
-        if required_token and provided_token != required_token:
-            # Close without accept to fail handshake for unauthorized
-            try:
-                await websocket.close(code=1008)
-            finally:
-                return
-    except Exception:
-        # Fail open if auth evaluation has unexpected error
-        pass
+    # REQUIRED token authentication for production security
+    settings = get_settings()
+    
+    # Get token from query params or headers
+    provided_token = (
+        websocket.query_params.get("token")
+        or websocket.headers.get("Authorization", "").replace("Bearer ", "")
+        or websocket.headers.get("X-ARIA-TOKEN")
+    )
+    
+    # Validate token - FAIL CLOSED for security
+    if not provided_token:
+        logger.warning(f"WebSocket connection rejected: no token provided from {websocket.client.host}")
+        await websocket.close(code=1008, reason="Authentication required")
+        return
+    
+    # Check against WebSocket token or admin API key
+    valid_token = False
+    if provided_token == settings.ARIA_WS_TOKEN:
+        valid_token = True
+        logger.info(f"WebSocket authenticated with WS token from {websocket.client.host}")
+    elif provided_token == settings.ADMIN_API_KEY:
+        valid_token = True
+        logger.info(f"WebSocket authenticated with admin key from {websocket.client.host}")
+    else:
+        # Try JWT token validation
+        try:
+            jwt_payload = verify_refresh_token(provided_token)
+            if jwt_payload:
+                valid_token = True
+                logger.info(f"WebSocket authenticated with JWT from {websocket.client.host}")
+        except Exception:
+            pass
+    
+    if not valid_token:
+        logger.warning(f"WebSocket connection rejected: invalid token from {websocket.client.host}")
+        await websocket.close(code=1008, reason="Invalid authentication token")
+        return
 
     await websocket.accept()
     client_id = id(websocket)
-    logger.info(f"WebSocket client {client_id} connected")
+    logger.info(f"✅ Secure WebSocket client {client_id} connected")
 
     hb_task: Optional[asyncio.Task] = None
     try:

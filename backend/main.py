@@ -1,54 +1,42 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, Response
 from backend.routes import (
+    auth,
+    trading,
     account,
     market,
     positions,
     signals,
-    trading,
     monitoring,
-    institutional_ai,
-    system_management,
+    monitoring_enhanced,
+    live_execution_api,
     smc_routes,
     websocket,
     debug,
     trade_memory_api,
     analytics,
-    model_management,
-    auth,
-)
-from backend.routes import (
-    monitoring_enhanced,
-    hedge_fund_dashboard,
-    live_execution_api,
+    institutional_ai,
+    system_management,
     training,
     telemetry_api,
+    health,
+    hedge_fund_dashboard,
 )
 from backend.services.data_source_manager import data_source_manager
 from backend.services.auto_trader import auto_trader
 from backend.services.mt5_market_data import mt5_market_feed
 from backend.services.cpp_integration import cpp_service
 from backend.core.performance_monitor import get_performance_monitor
+from backend.core.config import get_settings
+from backend.core.live_guard import enforce_live_only
+from backend.core.rate_limit import get_rate_limiter, RateLimitMiddleware
+from backend.core.auth import require_admin, require_trader
+from backend.core.security_middleware import setup_security_middleware
+from backend.core.audit import get_audit_logger, AuditEventType
+from backend.core.health import get_health_checker
 import asyncio
 import os
 import logging
 from logging.handlers import RotatingFileHandler
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
-from starlette.middleware.trustedhost import TrustedHostMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
-from urllib.parse import urlparse
-from backend.core.config import get_settings, Settings
-from backend.core.live_guard import enforce_live_only
-from backend.monitoring.llm_monitor import llm_monitor_service
-from backend.core.audit import get_audit_logger, AuditEventType
-from backend.core.health import get_health_checker
-from backend.core.rate_limit import get_rate_limiter, RateLimitMiddleware
-from backend.core.auth import get_current_user, require_admin, require_trader
-from backend.core.metrics import get_metrics_collector
-from backend.core.error_handler import ErrorBoundaryMiddleware
-from fastapi import APIRouter, Depends, HTTPException, Response
 from datetime import datetime
 
 def _configure_logging(level_name: str) -> None:
@@ -87,8 +75,14 @@ def _configure_logging(level_name: str) -> None:
     for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
         logging.getLogger(name).setLevel(level)
 
-S: Settings = get_settings()
-_configure_logging(S.LOG_LEVEL)
+# Initialize settings with validation
+try:
+    settings = get_settings()
+    _configure_logging(settings.LOG_LEVEL)
+except Exception as e:
+    print(f"CRITICAL: Configuration validation failed: {e}")
+    print("Please check your environment variables and ensure all required secrets are set.")
+    raise SystemExit(1)
 
 
 def _configure_file_logging(log_dir: str) -> None:
@@ -131,181 +125,89 @@ def _configure_file_logging(log_dir: str) -> None:
         pass
 
 
-_configure_file_logging(S.ARIA_LOG_DIR)
+_configure_file_logging(settings.ARIA_LOG_DIR)
 logger = logging.getLogger(__name__)
 
-
-def _build_csp_connect_src(settings: Settings) -> str:
-    """Build a safe connect-src list for CSP from env.
-
-    Sources include:
-    - 'self'
-    - Origins in ARIA_CORS_ORIGINS (http/https)
-    - Derived ws/wss origins for each CORS origin
-    - Additional entries from ARIA_CSP_CONNECT_SRC (space- or comma-separated)
-    """
-    sources = {"'self'"}
-
-    for origin in settings.cors_origins_list:
-        try:
-            p = urlparse(origin)
-            if p.scheme and p.netloc:
-                base = f"{p.scheme}://{p.netloc}"
-                sources.add(base)
-                if p.scheme in ("http", "https"):
-                    ws_scheme = "wss" if p.scheme == "https" else "ws"
-                    sources.add(f"{ws_scheme}://{p.netloc}")
-        except Exception:
-            # Ignore malformed entries
-            continue
-
-    for tok in settings.csp_connect_src_extra:
-        sources.add(tok)
-
-    return " ".join(sorted(sources))
+# Validate production security requirements
+logger.info("Validating production security configuration...")
+if not settings.JWT_SECRET_KEY or len(settings.JWT_SECRET_KEY) < 32:
+    logger.critical("JWT_SECRET_KEY must be at least 32 characters for production")
+    raise SystemExit(1)
+if not settings.ADMIN_API_KEY or len(settings.ADMIN_API_KEY) < 16:
+    logger.critical("ADMIN_API_KEY must be at least 16 characters for production")
+    raise SystemExit(1)
+if not settings.ARIA_WS_TOKEN or len(settings.ARIA_WS_TOKEN) < 16:
+    logger.critical("ARIA_WS_TOKEN must be at least 16 characters for production")
+    raise SystemExit(1)
+logger.info("✅ Security configuration validated")
 
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        response = await call_next(request)
-        try:
-            # Core security headers
-            response.headers.setdefault("X-Content-Type-Options", "nosniff")
-            response.headers.setdefault("X-Frame-Options", "DENY")
-            response.headers.setdefault("Referrer-Policy", "no-referrer")
-            response.headers.setdefault(
-                "Permissions-Policy",
-                "geolocation=(), microphone=(), camera=()",
-            )
-            response.headers.setdefault("Cache-Control", "no-store")
-
-            # HSTS for HTTPS
-            if getattr(request, "url", None) and getattr(request.url, "scheme", "") == "https":
-                response.headers.setdefault(
-                    "Strict-Transport-Security",
-                    "max-age=31536000; includeSubDomains; preload",
-                )
-
-            # Conservative CSP for API responses with configurable connect-src
-            connect_src = _build_csp_connect_src(S)
-            response.headers.setdefault(
-                "Content-Security-Policy",
-                f"default-src 'none'; frame-ancestors 'none'; base-uri 'none'; connect-src {connect_src}",
-            )
-        except Exception:
-            # Never fail request due to header setting issues
-            pass
-        return response
 
 
-def _validate_runtime_config(s: Settings) -> None:
-    """Log warnings/errors for missing or conflicting production settings.
-    Never raises; startup must not fail due to config validation.
-    """
+def _validate_runtime_config(settings) -> None:
+    """Validate production runtime configuration"""
     try:
-        # Ensure log directory exists
-        log_dir = s.ARIA_LOG_DIR
-        try:
-            os.makedirs(log_dir, exist_ok=True)
-        except Exception:
-            pass
-
-        mt5_enabled = s.mt5_enabled
-        if mt5_enabled:
-            missing = [
-                k
-                for k in ("MT5_LOGIN", "MT5_PASSWORD", "MT5_SERVER")
-                if (
-                    (k == "MT5_LOGIN" and s.MT5_LOGIN is None)
-                    or (k == "MT5_PASSWORD" and not s.MT5_PASSWORD)
-                    or (k == "MT5_SERVER" and not s.MT5_SERVER)
-                )
-            ]
-            if missing:
-                logger.error(
-                    f"MT5 is enabled but missing credentials: {', '.join(missing)}"
-                )
-
-        auto_enabled = s.AUTO_TRADE_ENABLED
-        dry_run = s.AUTO_TRADE_DRY_RUN
-        exec_enabled = s.ARIA_ENABLE_EXEC
-        if exec_enabled and dry_run:
-            logger.warning(
-                "ARIA_ENABLE_EXEC=1 but AUTO_TRADE_DRY_RUN=1; no live orders will be sent."
-            )
-        if auto_enabled and not dry_run and not exec_enabled:
-            logger.error(
-                "AutoTrader live mode requested but execution is disabled (ARIA_ENABLE_EXEC=0)."
-            )
-
-        admin_key = s.ADMIN_API_KEY or ""
-        if not admin_key:
-            logger.warning(
-                "ADMIN_API_KEY not set; admin SMC endpoints will reject requests."
-            )
-
-        allow_live = s.ALLOW_LIVE
-        auto_exec_ok = s.AUTO_EXEC_ENABLED
-        if auto_enabled and not dry_run and not (auto_exec_ok and allow_live):
-            logger.warning(
-                "AutoTrader live trades may be blocked by AUTO_EXEC_ENABLED/ALLOW_LIVE flags."
-            )
-
-        if auto_enabled and not mt5_enabled:
-            logger.error(
-                "Live-only policy: AUTO_TRADE_ENABLED=1 requires MT5 (ARIA_ENABLE_MT5=1). Alpha Vantage fallback is disabled."
-            )
+        os.makedirs(settings.ARIA_LOG_DIR, exist_ok=True)
+        
+        # Validate MT5 configuration if enabled
+        if settings.mt5_enabled:
+            if not all([settings.MT5_LOGIN, settings.MT5_PASSWORD, settings.MT5_SERVER]):
+                raise RuntimeError("MT5 enabled but missing required credentials (MT5_LOGIN, MT5_PASSWORD, MT5_SERVER)")
+        
+        # Validate auto-trading configuration
+        if settings.AUTO_TRADE_ENABLED and not settings.AUTO_TRADE_DRY_RUN:
+            if not settings.ARIA_ENABLE_EXEC:
+                raise RuntimeError("Live auto-trading requires ARIA_ENABLE_EXEC=1")
+            if not settings.mt5_enabled:
+                raise RuntimeError("Live auto-trading requires MT5 connection (ARIA_ENABLE_MT5=1)")
+        
+        # Validate CORS configuration
+        if not settings.cors_origins_list:
+            logger.warning("No CORS origins configured - frontend requests will be blocked")
+            
+        logger.info("✅ Runtime configuration validated")
+        
     except Exception as e:
-        logger.warning(f"Config validation encountered an issue: {e}")
+        logger.critical(f"Runtime configuration validation failed: {e}")
+        raise SystemExit(1)
 
 
-# Rate limiting configuration
-limiter = Limiter(key_func=get_remote_address)
-app = FastAPI(title="ARIA Institutional Forex AI")
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# Validate runtime configuration
+_validate_runtime_config(settings)
 
-# Enforce trusted hosts if configured
-_allowed_hosts = S.allowed_hosts_list
-if _allowed_hosts:
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=_allowed_hosts)
-    logger.info(f"Trusted hosts enforced: {_allowed_hosts}")
-else:
-    logger.warning("Trusted hosts not configured (ARIA_ALLOWED_HOSTS). Enforcement skipped.")
-
-# Strict CORS: require explicit ARIA_CORS_ORIGINS, no permissive fallback
-_cors_origins = S.cors_origins_list
-if not _cors_origins:
-    logger.error("CORS: ARIA_CORS_ORIGINS must be configured for production. No cross-origin requests allowed.")
-    _cors_origins = []  # Explicitly deny all cross-origin requests
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With", "X-ADMIN-KEY"],
+# Initialize FastAPI app
+app = FastAPI(
+    title="ARIA Institutional Forex AI",
+    version="1.2.0",
+    description="Production-grade institutional Forex trading platform with AI signals",
+    docs_url="/docs" if settings.JWT_ENABLED else None,  # Hide docs in production
+    redoc_url="/redoc" if settings.JWT_ENABLED else None
 )
-logger.info(f"CORS configured with strict whitelist: {_cors_origins}")
 
-# Add strict security headers
-app.add_middleware(SecurityHeadersMiddleware)
+# Setup comprehensive security middleware stack
+setup_security_middleware(app, settings, debug=False)
 
-# Add comprehensive error boundary middleware
-app.add_middleware(ErrorBoundaryMiddleware)
+# Add rate limiting middleware
+if settings.RATE_LIMIT_ENABLED:
+    rate_limiter = get_rate_limiter()
+    app.add_middleware(RateLimitMiddleware, rate_limiter)
+    logger.info(f"✅ Rate limiting enabled: {settings.RATE_LIMIT_REQUESTS_PER_MINUTE} req/min")
+else:
+    logger.warning("Rate limiting disabled - not recommended for production")
 
-# Add rate limiting middleware if enabled
-try:
-    if hasattr(S, 'RATE_LIMIT_ENABLED') and S.RATE_LIMIT_ENABLED:
-        rate_limiter = get_rate_limiter()
-        app.add_middleware(RateLimitMiddleware, rate_limiter=rate_limiter)
-        logger.info(f"Rate limiting enabled: {getattr(S, 'RATE_LIMIT_REQUESTS_PER_MINUTE', 60)} req/min")
-    else:
-        logger.info("Rate limiting disabled")
-except Exception as e:
-    logger.warning(f"Rate limiting configuration issue: {e}")
-    logger.info("Rate limiting disabled")
+# API v1 Router with versioning
+api_v1 = APIRouter(prefix="/api")
+api_v1.include_router(auth.router, tags=["Authentication"])
+api_v1.include_router(trading.router, prefix="/trading", tags=["Trading"])
+api_v1.include_router(account.router, prefix="/account", tags=["Account"])
+api_v1.include_router(market.router, prefix="/market", tags=["Market"])
+api_v1.include_router(positions.router, prefix="/positions", tags=["Positions"])
+api_v1.include_router(signals.router, prefix="/signals", tags=["Signals"])
 
+# Include API v1 router
+app.include_router(api_v1)
+
+# Legacy routes (for backward compatibility)
 app.include_router(auth.router, include_in_schema=False)
 app.include_router(trading.router, prefix="/trading", tags=["Trading"], include_in_schema=False)
 app.include_router(account.router, prefix="/account", tags=["Account"], include_in_schema=False)
@@ -324,6 +226,7 @@ app.include_router(institutional_ai.router, include_in_schema=False)
 app.include_router(system_management.router, include_in_schema=False)
 app.include_router(training.router, include_in_schema=False)
 app.include_router(telemetry_api.router, include_in_schema=False)
+app.include_router(health.router, include_in_schema=False)
 from backend.routes.model_management import router as model_management_router
 from backend.routes.cicd_management import router as cicd_management_router
 from backend.routes.hot_swap_admin import router as hot_swap_admin_router
@@ -351,6 +254,7 @@ api_router.include_router(institutional_ai.router)
 api_router.include_router(system_management.router)
 api_router.include_router(training.router)
 api_router.include_router(telemetry_api.router)
+api_router.include_router(health.router)
 api_router.include_router(model_management_router)
 api_router.include_router(cicd_management_router)
 api_router.include_router(hot_swap_admin_router)
@@ -469,17 +373,16 @@ async def get_prometheus_metrics():
 
 app.include_router(api_router)
 
-# Register data sources
-# Enforce MT5-only live feed; no simulated fallback
+# Register data sources with live-only enforcement
 try:
-    enforce_live_only(S)
+    enforce_live_only(settings)
     if mt5_market_feed not in data_source_manager.data_sources:
         data_source_manager.data_sources.append(mt5_market_feed)
     data_source_manager.mt5_feed = mt5_market_feed
-    logger.info("Registered MT5MarketFeed with DataSourceManager (live-only mode)")
+    logger.info("✅ Registered MT5MarketFeed with DataSourceManager (live-only mode)")
 except Exception as e:
-    logger.error(f"Failed to enforce live MT5 market data feed: {e}")
-    raise
+    logger.critical(f"Failed to enforce live MT5 market data feed: {e}")
+    raise SystemExit(1)
 
 # Register C++ SMC integration service (runs in Python fallback if C++ disabled)
 try:
@@ -520,14 +423,14 @@ async def startup_event():
     health_checker = get_health_checker()
     try:
         # Check MT5 if enabled - FAIL FAST
-        if S.mt5_enabled:
+        if settings.mt5_enabled:
             mt5_health = await health_checker.check_mt5_connection()
             if mt5_health.status == "unhealthy":
                 logger.critical(f"MT5 connection failed at startup: {mt5_health.error_message}")
                 raise RuntimeError(f"Cannot start: MT5 required but unavailable - {mt5_health.error_message}")
         
         # Check required models - FAIL FAST
-        if S.AUTO_TRADE_ENABLED:
+        if settings.AUTO_TRADE_ENABLED:
             models_health = await health_checker.check_models()
             if models_health.status == "unhealthy":
                 logger.critical(f"Required models missing at startup: {models_health.error_message}")
@@ -541,34 +444,35 @@ async def startup_event():
         raise
     
     # Start rate limiter cleanup task
-    if S.RATE_LIMIT_ENABLED:
+    if settings.RATE_LIMIT_ENABLED:
         rate_limiter = get_rate_limiter()
         rate_limiter.start_cleanup_task()
+        logger.info("✅ Rate limiter cleanup task started")
     
     try:
         # Log a concise configuration snapshot (no secrets)
         cfg = {
-            "LOG_LEVEL": S.LOG_LEVEL.upper(),
-            "MT5_ENABLED": str(int(S.mt5_enabled)),
-            "AUTO_TRADE_ENABLED": str(int(S.AUTO_TRADE_ENABLED)),
-            "PRIMARY_MODEL": S.AUTO_TRADE_PRIMARY_MODEL,
-            "SYMBOLS": ",".join(S.symbols_list),
-            "EXEC_ENABLED": str(int(S.ARIA_ENABLE_EXEC)),
-            "CPP_SMC": S.ARIA_ENABLE_CPP_SMC,
-            "LLM_MONITOR_ENABLED": str(int(S.LLM_MONITOR_ENABLED)),
-            "LLM_TUNING_ENABLED": str(int(S.LLM_TUNING_ENABLED)),
+            "LOG_LEVEL": settings.LOG_LEVEL.upper(),
+            "MT5_ENABLED": str(int(settings.mt5_enabled)),
+            "AUTO_TRADE_ENABLED": str(int(settings.AUTO_TRADE_ENABLED)),
+            "PRIMARY_MODEL": settings.AUTO_TRADE_PRIMARY_MODEL,
+            "SYMBOLS": ",".join(settings.symbols_list),
+            "EXEC_ENABLED": str(int(settings.ARIA_ENABLE_EXEC)),
+            "JWT_ENABLED": str(int(settings.JWT_ENABLED)),
+            "RATE_LIMIT_ENABLED": str(int(settings.RATE_LIMIT_ENABLED)),
         }
-        logger.info(f"Runtime config: {cfg}")
-        _validate_runtime_config(S)
+        logger.info(f"✅ Runtime config: {cfg}")
     except Exception:
         # Never fail startup due to logging
         pass
     try:
-        # Register LLM monitor service when enabled (before start_all ensures handler attached)
+        # Register LLM monitor service when enabled
         try:
-            if S.LLM_MONITOR_ENABLED and llm_monitor_service not in data_source_manager.data_sources:
-                data_source_manager.data_sources.append(llm_monitor_service)
-                logger.info("Registered LLMMonitorService with DataSourceManager")
+            if settings.LLM_MONITOR_ENABLED:
+                from backend.monitoring.llm_monitor import llm_monitor_service
+                if llm_monitor_service not in data_source_manager.data_sources:
+                    data_source_manager.data_sources.append(llm_monitor_service)
+                    logger.info("✅ Registered LLMMonitorService with DataSourceManager")
         except Exception as e:
             logger.error(f"Failed to register LLMMonitorService: {e}")
 
@@ -611,13 +515,16 @@ async def startup_event():
         await data_source_manager.start_all()
         logger.info("Data sources started successfully")
 
-        # Optionally start AutoTrader if enabled via env
-        if S.AUTO_TRADE_ENABLED:
+        # Start AutoTrader if enabled
+        if settings.AUTO_TRADE_ENABLED:
             try:
                 app.state.auto_trader_task = asyncio.create_task(auto_trader.start())
-                logger.info("AutoTrader started")
+                logger.info("✅ AutoTrader started")
             except Exception as e:
                 logger.error(f"Failed to start AutoTrader: {e}")
+                if not settings.AUTO_TRADE_DRY_RUN:
+                    # Fail fast for live trading issues
+                    raise
 
         # Start Performance Monitor background tasks
         try:
@@ -766,14 +673,20 @@ async def health():
     
     # Check MT5 connectivity
     try:
-        from backend.services.mt5_executor import mt5_executor
-        mt5_connected = mt5_executor.is_connected()
-        health_status["checks"]["mt5"] = {
-            "status": "connected" if mt5_connected else "disconnected",
-            "healthy": mt5_connected
-        }
-        if not mt5_connected:
-            health_status["status"] = "degraded"
+        if settings.mt5_enabled:
+            from backend.services.mt5_executor import mt5_executor
+            mt5_connected = mt5_executor.is_connected()
+            health_status["checks"]["mt5"] = {
+                "status": "connected" if mt5_connected else "disconnected",
+                "healthy": mt5_connected
+            }
+            if not mt5_connected:
+                health_status["status"] = "degraded"
+        else:
+            health_status["checks"]["mt5"] = {
+                "status": "disabled",
+                "healthy": True
+            }
     except Exception as e:
         health_status["checks"]["mt5"] = {
             "status": "error",

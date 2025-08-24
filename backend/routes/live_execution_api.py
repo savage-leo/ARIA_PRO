@@ -6,11 +6,12 @@ Real-time trading control, monitoring, and risk management
 from __future__ import annotations
 import os, time
 from typing import Dict, List, Any
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel
 
 from backend.services.mt5_execution_harness import mt5_execution_harness
 from backend.services.hedge_fund_analytics import hedge_fund_analytics
+from backend.core.auth import require_admin, User
 
 router = APIRouter(prefix="/live-execution", tags=["Live Execution"])
 
@@ -32,7 +33,7 @@ def get_execution_status() -> Dict[str, Any]:
 
 
 @router.post("/connect")
-def connect_mt5() -> Dict[str, str]:
+def connect_mt5(current_user: User = Depends(require_admin)) -> Dict[str, str]:
     """Connect to MT5 for live trading"""
     try:
         success = mt5_execution_harness.connect()
@@ -45,7 +46,7 @@ def connect_mt5() -> Dict[str, str]:
 
 
 @router.post("/disconnect")
-def disconnect_mt5() -> Dict[str, str]:
+def disconnect_mt5(current_user: User = Depends(require_admin)) -> Dict[str, str]:
     """Disconnect from MT5"""
     try:
         mt5_execution_harness.disconnect()
@@ -55,7 +56,7 @@ def disconnect_mt5() -> Dict[str, str]:
 
 
 @router.post("/symbol/toggle")
-def toggle_symbol(toggle: SymbolToggle) -> Dict[str, str]:
+def toggle_symbol(toggle: SymbolToggle, current_user: User = Depends(require_admin)) -> Dict[str, str]:
     """Enable or disable trading for a symbol"""
     try:
         if toggle.enabled:
@@ -104,7 +105,7 @@ def get_supported_symbols() -> Dict[str, List[str]]:
 
 
 @router.post("/kill-switch")
-def control_kill_switch(command: KillSwitchCommand) -> Dict[str, str]:
+def control_kill_switch(command: KillSwitchCommand, current_user: User = Depends(require_admin)) -> Dict[str, str]:
     """Control the kill switch"""
     try:
         if command.action == "activate":
@@ -153,7 +154,7 @@ def get_audit_summary() -> Dict[str, Any]:
 
 
 @router.post("/quick-start")
-def quick_start_trading(background_tasks: BackgroundTasks) -> Dict[str, str]:
+def quick_start_trading(background_tasks: BackgroundTasks, current_user: User = Depends(require_admin)) -> Dict[str, str]:
     """Quick start live trading with default symbols"""
     try:
         # Connect to MT5
@@ -174,7 +175,7 @@ def quick_start_trading(background_tasks: BackgroundTasks) -> Dict[str, str]:
 
 
 @router.post("/emergency-stop")
-def emergency_stop() -> Dict[str, str]:
+def emergency_stop(current_user: User = Depends(require_admin)) -> Dict[str, str]:
     """Emergency stop - activate kill switch and disconnect"""
     try:
         mt5_execution_harness.activate_kill_switch("Emergency stop activated")

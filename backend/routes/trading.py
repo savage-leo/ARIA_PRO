@@ -61,9 +61,9 @@ class OrderResponse(BaseModel):
     slippage: Optional[float] = None
 
 
-@router.post("/place-order", response_model=OrderResponse)
-@limiter.limit("5/minute")
-async def place_order(
+@router.post("/execute-order", response_model=OrderResponse)
+@limiter.limit("10/minute")
+async def execute_order(
     request: Request,
     order: OrderRequest,
     current_user: User = Depends(require_trader),
@@ -124,11 +124,11 @@ async def place_order(
             )
             duration = time.perf_counter() - start_time
             metrics.record_api_request(
-                method="POST", endpoint="/trading/place-order", status=400, duration=duration
+                method="POST", endpoint="/trading/execute-order", status=400, duration=duration
             )
             slog.api_event(
                 method="POST",
-                endpoint="/trading/place-order",
+                endpoint="/trading/execute-order",
                 status_code=400,
                 response_time=duration,
                 user_id=user_id,
@@ -162,11 +162,11 @@ async def place_order(
             )
             duration = time.perf_counter() - start_time
             metrics.record_api_request(
-                method="POST", endpoint="/trading/place-order", status=503, duration=duration
+                method="POST", endpoint="/trading/execute-order", status=503, duration=duration
             )
             slog.api_event(
                 method="POST",
-                endpoint="/trading/place-order",
+                endpoint="/trading/execute-order",
                 status_code=503,
                 response_time=duration,
                 user_id=user_id,
@@ -235,11 +235,11 @@ async def place_order(
 
         # API metrics/logging for success
         metrics.record_api_request(
-            method="POST", endpoint="/trading/place-order", status=200, duration=latency
+            method="POST", endpoint="/trading/execute-order", status=200, duration=latency
         )
         slog.api_event(
             method="POST",
-            endpoint="/trading/place-order",
+            endpoint="/trading/execute-order",
             status_code=200,
             response_time=latency,
             user_id=user_id,
@@ -260,11 +260,11 @@ async def place_order(
         metrics.record_order_rejected(symbol=order.symbol, reason="mt5_runtime_error")
         duration = time.perf_counter() - start_time
         metrics.record_api_request(
-            method="POST", endpoint="/trading/place-order", status=503, duration=duration
+            method="POST", endpoint="/trading/execute-order", status=503, duration=duration
         )
         slog.api_event(
             method="POST",
-            endpoint="/trading/place-order",
+            endpoint="/trading/execute-order",
             status_code=503,
             response_time=duration,
             user_id=user_id,
@@ -292,11 +292,11 @@ async def place_order(
         metrics.record_order_rejected(symbol=order.symbol, reason="validation_error")
         duration = time.perf_counter() - start_time
         metrics.record_api_request(
-            method="POST", endpoint="/trading/place-order", status=400, duration=duration
+            method="POST", endpoint="/trading/execute-order", status=400, duration=duration
         )
         slog.api_event(
             method="POST",
-            endpoint="/trading/place-order",
+            endpoint="/trading/execute-order",
             status_code=400,
             response_time=duration,
             user_id=user_id,
@@ -323,11 +323,11 @@ async def place_order(
     except Exception as e:
         duration = time.perf_counter() - start_time
         metrics.record_api_request(
-            method="POST", endpoint="/trading/place-order", status=500, duration=duration
+            method="POST", endpoint="/trading/execute-order", status=500, duration=duration
         )
         slog.api_event(
             method="POST",
-            endpoint="/trading/place-order",
+            endpoint="/trading/execute-order",
             status_code=500,
             response_time=duration,
             user_id=user_id,
@@ -397,12 +397,11 @@ async def get_positions(
         raise HTTPException(status_code=503, detail=f"Positions unavailable: {str(e)}")
 
 
-@router.delete("/close-position/{ticket}")
-@limiter.limit("10/minute")
+@router.post("/close-position")
+@limiter.limit("20/minute")
 async def close_position(
     request: Request,
     ticket: int,
-    volume: Optional[float] = None,
     current_user: User = Depends(require_trader),
 ):
     """Close a specific position"""

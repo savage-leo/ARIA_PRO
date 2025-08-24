@@ -1,14 +1,15 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 import logging
 from backend.services.mt5_executor import mt5_executor
 from backend.core.redis_cache import get_cache_manager
+from backend.core.auth import get_current_user, require_trader
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
 @router.get("/info")
-async def get_account_info():
+async def get_account_info(current_user=Depends(require_trader)):
     """Get MT5 account information"""
     cache_manager = get_cache_manager()
     
@@ -34,7 +35,7 @@ async def get_account_info():
 
 
 @router.get("/balance")
-async def get_balance():
+async def get_balance(current_user=Depends(require_trader)):
     """Get account balance"""
     cache_manager = get_cache_manager()
     

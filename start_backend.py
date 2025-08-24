@@ -13,14 +13,20 @@ project_root = Path(__file__).parent.absolute()
 sys.path.insert(0, str(project_root))
 os.environ['PYTHONPATH'] = str(project_root)
 
-# Set essential environment variables if not set
+# Load production.env if it exists
+try:
+    from dotenv import load_dotenv
+    env_file = project_root / "production.env"
+    if env_file.exists():
+        load_dotenv(env_file)
+        print(f"✅ Loaded production environment from {env_file.name}")
+except ImportError:
+    print("⚠️  python-dotenv not available, using environment variables only")
+
+# Set essential environment variables if not set (safe defaults)
 defaults = {
-    'ARIA_ENABLE_MT5': 'false',  # Set to true when MT5 is configured
-    'AUTO_TRADE_ENABLED': 'false',  # Set to true for live trading
     'ARIA_LOG_LEVEL': 'INFO',
     'ARIA_ENV': 'production',
-    'ARIA_CORS_ORIGINS': 'http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:5176,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175,http://127.0.0.1:5176',
-    'ARIA_ALLOWED_HOSTS': 'localhost,127.0.0.1',
 }
 
 for key, value in defaults.items():
