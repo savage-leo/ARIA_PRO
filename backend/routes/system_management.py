@@ -1,10 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel
-import psutil
-import time
+from typing import Dict, Any, Optional
 import asyncio
-from typing import Dict, Any
 import logging
+import time
+from backend.core.auth import require_admin, User
 from backend.services.ws_broadcaster import broadcaster
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ async def get_system_status():
 
 
 @router.post("/mt5/toggle")
-async def toggle_mt5_connection(request: ServiceToggleRequest):
+async def toggle_mt5_connection(request: ServiceToggleRequest, current_user: User = Depends(require_admin)):
     """Toggle MT5 connection"""
     try:
         # Import MT5 service (global instance). If MetaTrader5 is not installed, degrade gracefully.
@@ -106,7 +106,7 @@ async def toggle_mt5_connection(request: ServiceToggleRequest):
 
 
 @router.post("/signals/toggle")
-async def toggle_signal_generator(request: ServiceToggleRequest):
+async def toggle_signal_generator(request: ServiceToggleRequest, current_user: User = Depends(require_admin)):
     """Toggle AI signal generator"""
     try:
         system_state["signal_generator_active"] = request.enabled
@@ -131,7 +131,7 @@ async def toggle_signal_generator(request: ServiceToggleRequest):
 
 
 @router.post("/risk/toggle")
-async def toggle_risk_engine(request: ServiceToggleRequest):
+async def toggle_risk_engine(request: ServiceToggleRequest, current_user: User = Depends(require_admin)):
     """Toggle risk management engine"""
     try:
         system_state["risk_engine_active"] = request.enabled
@@ -154,7 +154,7 @@ async def toggle_risk_engine(request: ServiceToggleRequest):
 
 
 @router.post("/websocket/toggle")
-async def toggle_websocket_server(request: ServiceToggleRequest):
+async def toggle_websocket_server(request: ServiceToggleRequest, current_user: User = Depends(require_admin)):
     """Toggle WebSocket server"""
     try:
         # This backend always exposes the /ws endpoint when the app is running.
@@ -179,7 +179,7 @@ async def toggle_websocket_server(request: ServiceToggleRequest):
 
 
 @router.post("/restart")
-async def restart_system():
+async def restart_system(current_user: User = Depends(require_admin)):
     """Restart the entire ARIA system"""
     try:
         logger.warning("System restart initiated")
@@ -216,7 +216,7 @@ async def restart_system():
 
 
 @router.post("/emergency-stop")
-async def emergency_stop():
+async def emergency_stop(current_user: User = Depends(require_admin)):
     """Emergency stop - halt all trading and AI services immediately"""
     try:
         logger.critical("EMERGENCY STOP ACTIVATED")

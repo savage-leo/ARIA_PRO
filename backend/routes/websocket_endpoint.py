@@ -13,7 +13,7 @@ from datetime import datetime
 
 from backend.core.websocket_pool import get_websocket_pool, MessageType
 from backend.core.redis_cache import get_redis_cache
-from backend.services.mt5_market_data import MT5MarketDataService
+from backend.services.mt5_market_data import MT5MarketFeed
 from backend.services.real_ai_signal_generator import RealAISignalGenerator
 
 router = APIRouter()

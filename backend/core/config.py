@@ -13,13 +13,13 @@ logger = logging.getLogger(__name__)
 
 # Try Pydantic v2 (pydantic-settings) first, then fallback to v1 BaseSettings
 try:
-    from pydantic_settings import BaseSettings as _BaseSettings  # type: ignore
-    from pydantic import Field, validator  # type: ignore
-    _V2 = True
+    from pydantic import BaseSettings as _BaseSettings, Field, validator  # type: ignore
+    _V2 = False
 except Exception:
     try:
-        from pydantic import BaseSettings as _BaseSettings, Field, validator  # type: ignore
-        _V2 = False
+        from pydantic_settings import BaseSettings as _BaseSettings  # type: ignore
+        from pydantic import Field, validator  # type: ignore
+        _V2 = True
     except Exception:
         _BaseSettings = None  # type: ignore
         Field = None  # type: ignore
@@ -92,8 +92,8 @@ if _BaseSettings is not None:
         ARIA_ALLOWED_HOSTS: str = Field(default="", env="ARIA_ALLOWED_HOSTS")
         ARIA_CSP_CONNECT_SRC: str = Field(default="", env="ARIA_CSP_CONNECT_SRC")
 
-        # MT5 / Trading flags
-        ARIA_ENABLE_MT5: bool = Field(default=True, env="ARIA_ENABLE_MT5")
+        # MT5 / Trading flags - SECURE DEFAULTS
+        ARIA_ENABLE_MT5: bool = Field(default=False, env="ARIA_ENABLE_MT5")
         MT5_LOGIN: Optional[int] = Field(default=None, env="MT5_LOGIN")
         MT5_PASSWORD: Optional[str] = Field(default=None, env="MT5_PASSWORD")
         MT5_SERVER: Optional[str] = Field(default=None, env="MT5_SERVER")
@@ -105,26 +105,26 @@ if _BaseSettings is not None:
         ARIA_FEED_BAR_SECONDS: Optional[int] = Field(default=None, env="ARIA_FEED_BAR_SECONDS")
         ARIA_INCLUDE_XGB: bool = Field(default=True, env="ARIA_INCLUDE_XGB")
 
-        # Auto-trade + execution
+        # Auto-trade + execution - SECURE DEFAULTS
         AUTO_TRADE_ENABLED: bool = Field(default=False, env="AUTO_TRADE_ENABLED")
         AUTO_TRADE_DRY_RUN: bool = Field(default=True, env="AUTO_TRADE_DRY_RUN")
         AUTO_TRADE_PRIMARY_MODEL: str = Field(default="xgb", env="AUTO_TRADE_PRIMARY_MODEL")
-        ARIA_ENABLE_EXEC: bool = Field(default=True, env="ARIA_ENABLE_EXEC")
-        AUTO_EXEC_ENABLED: bool = Field(default=True, env="AUTO_EXEC_ENABLED")
-        ALLOW_LIVE: bool = Field(default=True, env="ALLOW_LIVE")
+        ARIA_ENABLE_EXEC: bool = Field(default=False, env="ARIA_ENABLE_EXEC")
+        AUTO_EXEC_ENABLED: bool = Field(default=False, env="AUTO_EXEC_ENABLED")
+        ALLOW_LIVE: bool = Field(default=False, env="ALLOW_LIVE")
 
         # Quick profit strategy toggles
         ENABLE_QUICK_PROFIT: bool = Field(default=False, env="ENABLE_QUICK_PROFIT")
         ENABLE_ARBITRAGE: bool = Field(default=False, env="ENABLE_ARBITRAGE")
         ENABLE_NEWS_TRADING: bool = Field(default=False, env="ENABLE_NEWS_TRADING")
 
-        # Admin/API
-        ADMIN_API_KEY: str = Field(default="", env="ADMIN_API_KEY")
+        # Admin/API - REQUIRED for production
+        ADMIN_API_KEY: str = Field(..., env="ADMIN_API_KEY", min_length=16)
         ARIA_ENABLE_CPP_SMC: str = Field(default="auto", env="ARIA_ENABLE_CPP_SMC")
 
-        # WebSocket
+        # WebSocket - Token required for production
         ARIA_WS_HEARTBEAT_SEC: int = Field(default=20, env="ARIA_WS_HEARTBEAT_SEC")
-        ARIA_WS_TOKEN: str = Field(default="", env="ARIA_WS_TOKEN")
+        ARIA_WS_TOKEN: str = Field(..., env="ARIA_WS_TOKEN", min_length=16)
 
         # LLM Monitor / Tuning
         LLM_MONITOR_ENABLED: bool = Field(default=False, env="LLM_MONITOR_ENABLED")
@@ -134,12 +134,12 @@ if _BaseSettings is not None:
         LLM_TUNING_MAX_REL_DELTA: float = Field(default=0.2, env="LLM_TUNING_MAX_REL_DELTA")
         LLM_TUNING_COOLDOWN_SEC: int = Field(default=300, env="LLM_TUNING_COOLDOWN_SEC")
         
-        # JWT Authentication settings
+        # JWT Authentication settings - REQUIRED for production
         JWT_SECRET_KEY: str = Field(default="", env="JWT_SECRET_KEY")
         JWT_ALGORITHM: str = Field(default="HS256", env="JWT_ALGORITHM")
         JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, env="JWT_ACCESS_TOKEN_EXPIRE_MINUTES")
         JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, env="JWT_REFRESH_TOKEN_EXPIRE_DAYS")
-        JWT_ENABLED: bool = Field(default=False, env="JWT_ENABLED")
+        JWT_ENABLED: bool = Field(default=True, env="JWT_ENABLED")
         
         # Rate limiting - Production defaults
         RATE_LIMIT_ENABLED: bool = Field(default=True, env="RATE_LIMIT_ENABLED")
@@ -191,10 +191,40 @@ if _BaseSettings is not None:
                 raise ValueError('JWT_ACCESS_TOKEN_EXPIRE_MINUTES must be between 1 and 1440')
             return v
         
+        @validator('JWT_SECRET_KEY')
+        def validate_jwt_secret(cls, v):
+            if not v or len(v) < 32:
+                raise ValueError('JWT_SECRET_KEY must be at least 32 characters for production security')
+            return v
+        
+        @validator('ADMIN_API_KEY')
+        def validate_admin_key(cls, v):
+            if not v or len(v) < 16:
+                raise ValueError('ADMIN_API_KEY must be at least 16 characters for production security')
+            return v
+        
+        @validator('ARIA_WS_TOKEN')
+        def validate_ws_token(cls, v):
+            if not v or len(v) < 16:
+                raise ValueError('ARIA_WS_TOKEN must be at least 16 characters for production security')
+            return v
+        
         @validator('MT5_LOGIN')
         def validate_mt5_login(cls, v, values):
             if values.get('ARIA_ENABLE_MT5') and not v:
-                logger.warning('MT5 enabled but MT5_LOGIN not configured')
+                raise ValueError('MT5_LOGIN is required when ARIA_ENABLE_MT5=1')
+            return v
+        
+        @validator('MT5_PASSWORD')
+        def validate_mt5_password(cls, v, values):
+            if values.get('ARIA_ENABLE_MT5') and not v:
+                raise ValueError('MT5_PASSWORD is required when ARIA_ENABLE_MT5=1')
+            return v
+        
+        @validator('MT5_SERVER')
+        def validate_mt5_server(cls, v, values):
+            if values.get('ARIA_ENABLE_MT5') and not v:
+                raise ValueError('MT5_SERVER is required when ARIA_ENABLE_MT5=1')
             return v
 
         # Convenience accessors
@@ -326,6 +356,30 @@ else:
                 self.LLM_TUNING_COOLDOWN_SEC = int(os.environ.get("LLM_TUNING_COOLDOWN_SEC", "300"))
             except Exception:
                 self.LLM_TUNING_COOLDOWN_SEC = 300
+
+            # JWT Authentication
+            self.JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "")
+            self.JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
+            try:
+                self.JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+            except Exception:
+                self.JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 30
+            try:
+                self.JWT_REFRESH_TOKEN_EXPIRE_DAYS = int(os.environ.get("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+            except Exception:
+                self.JWT_REFRESH_TOKEN_EXPIRE_DAYS = 7
+            self.JWT_ENABLED = os.environ.get("JWT_ENABLED", "1") in ("1", "true", "True")
+
+            # Rate Limiting
+            self.RATE_LIMIT_ENABLED = os.environ.get("RATE_LIMIT_ENABLED", "1") in ("1", "true", "True")
+            try:
+                self.RATE_LIMIT_REQUESTS_PER_MINUTE = int(os.environ.get("RATE_LIMIT_REQUESTS_PER_MINUTE", "200"))
+            except Exception:
+                self.RATE_LIMIT_REQUESTS_PER_MINUTE = 200
+            try:
+                self.RATE_LIMIT_BURST = int(os.environ.get("RATE_LIMIT_BURST", "50"))
+            except Exception:
+                self.RATE_LIMIT_BURST = 50
 
         @property
         def mt5_enabled(self) -> bool:
