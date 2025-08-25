@@ -65,6 +65,11 @@ class ReasoningAgent:
     async def process_message(self, message: AgentMessage) -> Optional[Dict]:
         """Process incoming message and optionally respond"""
         
+        # Validate message content
+        if not isinstance(message.content, dict):
+            logger.warning(f"Invalid message content type from {message.sender}: {type(message.content)}")
+            return None
+            
         # Update knowledge from message
         self.knowledge_base[message.sender] = message.content
         
@@ -96,9 +101,15 @@ class ReasoningAgent:
         if agent not in self.trust_scores:
             self.trust_scores[agent] = 0.5
             
+        # Validate outcome is in [0, 1]
+        outcome = max(0.0, min(1.0, outcome))
+            
         # Exponential moving average update
         alpha = 0.1
         self.trust_scores[agent] = (1 - alpha) * self.trust_scores[agent] + alpha * outcome
+        
+        # Ensure trust score stays in [0, 1]
+        self.trust_scores[agent] = max(0.0, min(1.0, self.trust_scores[agent]))
 
 
 class TechnicalAnalysisAgent(ReasoningAgent):
@@ -141,10 +152,10 @@ class TechnicalAnalysisAgent(ReasoningAgent):
         # Form decision
         if bullish_signals > bearish_signals + 1:
             decision = "buy"
-            confidence = min(0.9, bullish_signals / 4)
+            confidence = max(0.0, min(0.9, bullish_signals / 4))
         elif bearish_signals > bullish_signals + 1:
             decision = "sell"
-            confidence = min(0.9, bearish_signals / 4)
+            confidence = max(0.0, min(0.9, bearish_signals / 4))
         else:
             decision = "hold"
             confidence = 0.4
@@ -186,10 +197,10 @@ class FundamentalAnalysisAgent(ReasoningAgent):
         # Form decision
         if fundamental_score > 0.2:
             decision = "buy"
-            confidence = min(0.85, abs(fundamental_score))
+            confidence = max(0.0, min(0.85, abs(fundamental_score)))
         elif fundamental_score < -0.2:
             decision = "sell"
-            confidence = min(0.85, abs(fundamental_score))
+            confidence = max(0.0, min(0.85, abs(fundamental_score)))
         else:
             decision = "hold"
             confidence = 0.3
@@ -294,10 +305,10 @@ class PatternRecognitionAgent(ReasoningAgent):
         # Form decision
         if pattern_score > 0.3:
             decision = "buy"
-            confidence = min(0.9, abs(pattern_score))
+            confidence = max(0.0, min(0.9, abs(pattern_score)))
         elif pattern_score < -0.3:
             decision = "sell"
-            confidence = min(0.9, abs(pattern_score))
+            confidence = max(0.0, min(0.9, abs(pattern_score)))
         else:
             decision = "hold"
             confidence = 0.4
@@ -337,10 +348,10 @@ class ReinforcementLearningAgent(ReasoningAgent):
         
         if rl_score > 0.2:
             decision = "buy"
-            confidence = min(0.85, abs(rl_score))
+            confidence = max(0.0, min(0.85, abs(rl_score)))
         elif rl_score < -0.2:
             decision = "sell"
-            confidence = min(0.85, abs(rl_score))
+            confidence = max(0.0, min(0.85, abs(rl_score)))
         else:
             decision = "hold"
             confidence = 0.5
@@ -426,6 +437,8 @@ class CrossAgentReasoning:
         for round_num in range(rounds):
             # Share opinions among agents
             for opinion in opinions:
+                # Validate confidence before broadcasting
+                priority = max(0.0, min(1.0, opinion.confidence))
                 await self.broadcast_message(
                     opinion.agent_name,
                     {
@@ -433,14 +446,36 @@ class CrossAgentReasoning:
                         'confidence': opinion.confidence,
                         'reasoning': opinion.reasoning
                     },
-                    priority=opinion.confidence
+                    priority=priority
                 )
                 
-            # Allow agents to process messages
-            await asyncio.sleep(0.01)  # Brief pause for message processing
+            # Process message queues for each agent
+            process_tasks = []
+            for agent_name, agent in self.agents.items():
+                # Process up to 10 messages per agent per round
+                async def process_agent_messages(ag):
+                    messages_processed = 0
+                    while not ag.message_queue.empty() and messages_processed < 10:
+                        try:
+                            message = await asyncio.wait_for(
+                                ag.message_queue.get(), 
+                                timeout=0.01
+                            )
+                            await ag.process_message(message)
+                            messages_processed += 1
+                        except asyncio.TimeoutError:
+                            break
+                        except Exception as e:
+                            logger.warning(f"Message processing error for {ag.name}: {e}")
+                            
+                process_tasks.append(process_agent_messages(agent))
+                
+            # Process all agents' messages in parallel
+            await asyncio.gather(*process_tasks, return_exceptions=True)
             
-            # Agents can adjust opinions based on others' input
-            # (In a full implementation, agents would process their queues here)
+            # Brief pause between rounds
+            if round_num < rounds - 1:
+                await asyncio.sleep(0.01)
             
         return opinions
         
@@ -463,13 +498,21 @@ class CrossAgentReasoning:
         total_confidence = 0
         
         for opinion in opinions:
+            # Validate decision is valid
+            if opinion.decision not in decision_weights:
+                logger.warning(f"Invalid decision from {opinion.agent_name}: {opinion.decision}")
+                continue
+                
             # Apply agent trust scores if available
             trust = 1.0  # Default trust
             
+            # Validate and clip confidence to [0, 1]
+            confidence = max(0.0, min(1.0, opinion.confidence))
+            
             # Weight by confidence and trust
-            weight = opinion.confidence * trust
+            weight = confidence * trust
             decision_weights[opinion.decision] += weight
-            total_confidence += opinion.confidence
+            total_confidence += confidence
             
         # Normalize weights
         if total_confidence > 0:
@@ -533,7 +576,10 @@ class CrossAgentReasoning:
         
         # Base position size on confidence and risk
         if risk_opinion:
-            risk_factor = 1.0 - risk_opinion.supporting_data.get('risk_score', 0) / 0.02
+            risk_score = risk_opinion.supporting_data.get('risk_score', 0)
+            # Validate risk_score is non-negative
+            risk_score = max(0.0, risk_score)
+            risk_factor = max(0.0, min(1.0, 1.0 - risk_score / 0.02))
             position_size = confidence * risk_factor
         else:
             position_size = confidence * 0.8

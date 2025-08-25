@@ -1,6 +1,6 @@
 // API Configuration
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
-export const WS_BASE_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000';
+export const API_BASE_URL = import.meta.env.VITE_BACKEND_BASE || 'http://localhost:8100';
+export const WS_BASE_URL = import.meta.env.VITE_BACKEND_WS || 'ws://localhost:8100';
 
 // Environment
 export const isDevelopment = import.meta.env.DEV;

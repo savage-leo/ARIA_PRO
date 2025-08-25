@@ -3,7 +3,7 @@
  * Handles HTTP requests, authentication, and error handling
  */
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const API_BASE = import.meta.env.VITE_BACKEND_BASE || 'http://localhost:8100';
 
 interface ApiResponse<T = any> {
   ok: boolean;
@@ -27,9 +27,9 @@ class ApiClient {
   ): Promise<ApiResponse<T>> {
     const url = `${this.baseUrl}${endpoint}`;
     
-    const headers: HeadersInit = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...options.headers,
+      ...(options.headers as Record<string, string>),
     };
 
     if (this.token) {

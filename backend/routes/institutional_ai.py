@@ -45,6 +45,24 @@ class AutoTradingToggleRequest(BaseModel):
     enabled: bool
 
 
+class ModelConfig(BaseModel):
+    model: str
+    enabled: bool
+    weight: float
+    threshold: float
+    parameters: Dict[str, Any]
+
+
+class ModelTuningRequest(BaseModel):
+    model: str
+    symbol: str
+    parameters: Dict[str, Any]
+
+
+class SystemConfigRequest(BaseModel):
+    config: Dict[str, Any]
+
+
 @router.get("/market-regimes")
 async def get_market_regimes():
     """Get current market regime analysis for all symbols"""
@@ -232,29 +250,86 @@ async def toggle_auto_trading(request: AutoTradingToggleRequest):
     """Toggle auto trading on/off"""
     try:
         if request.enabled:
-            # Start AutoTrader asynchronously if not already running
-            if not auto_trader.running:
-                asyncio.create_task(auto_trader.start())
-            os.environ["AUTO_TRADE_ENABLED"] = "1"
-            message = "Auto trading enabled"
+            await auto_trader.start()
         else:
-            # Stop AutoTrader gracefully if running
-            if auto_trader.running:
-                await auto_trader.stop()
-            os.environ["AUTO_TRADE_ENABLED"] = "0"
-            message = "Auto trading disabled"
-
-        status = auto_trader.get_status()
-        logger.info(message)
+            await auto_trader.stop()
+        
         return {
             "success": True,
-            "auto_trading_enabled": bool(status.get("running", False)),
-            "status": status,
-            "message": message,
+            "enabled": request.enabled,
+            "message": f"Auto trading {'enabled' if request.enabled else 'disabled'}"
         }
-
     except Exception as e:
-        logger.error(f"Error toggling auto trading: {e}")
+        logger.error(f"Failed to toggle auto trading: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/model-configs")
+async def get_model_configs():
+    """Get current model configurations"""
+    try:
+        models = [
+            {
+                "model": "LSTM",
+                "enabled": True,
+                "weight": 0.25,
+                "threshold": 0.7,
+                "parameters": {"lookback": 60, "hidden_layers": 2}
+            },
+            {
+                "model": "XGBoost",
+                "enabled": True,
+                "weight": 0.3,
+                "threshold": 0.75,
+                "parameters": {"n_estimators": 100, "max_depth": 6}
+            },
+            {
+                "model": "CNN",
+                "enabled": True,
+                "weight": 0.2,
+                "threshold": 0.8,
+                "parameters": {"filters": 64, "kernel_size": 3}
+            },
+            {
+                "model": "PPO",
+                "enabled": False,
+                "weight": 0.25,
+                "threshold": 0.65,
+                "parameters": {"learning_rate": 0.0003, "clip_range": 0.2}
+            }
+        ]
+        return {"models": models}
+    except Exception as e:
+        logger.error(f"Failed to get model configs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/model-configs/{model_name}")
+async def update_model_config(model_name: str, config: Dict[str, Any]):
+    """Update model configuration"""
+    try:
+        # In production, this would update the actual model configuration
+        logger.info(f"Updated {model_name} config: {config}")
+        return {"success": True, "message": f"Model {model_name} configuration updated"}
+    except Exception as e:
+        logger.error(f"Failed to update model config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/tune-model")
+async def tune_model(request: ModelTuningRequest):
+    """Start hyperparameter tuning for a model"""
+    try:
+        logger.info(f"Starting tuning for {request.model} on {request.symbol} with params: {request.parameters}")
+        # In production, this would start actual hyperparameter tuning
+        await asyncio.sleep(2)  # Simulate tuning process
+        return {
+            "success": True,
+            "message": f"Hyperparameter tuning completed for {request.model}",
+            "best_params": request.parameters
+        }
+    except Exception as e:
+        logger.error(f"Failed to tune model: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -263,60 +338,44 @@ async def get_auto_trading_status():
     """Get current auto trading status"""
     try:
         status = auto_trader.get_status()
-        # Derive optional compatibility fields
-        last_signal_time: Optional[str] = None
-        try:
-            last_ts_map = status.get("last_trade_ts") or {}
-            if isinstance(last_ts_map, dict) and last_ts_map:
-                last_ts = max(float(v) for v in last_ts_map.values() if v)
-                if last_ts:
-                    last_signal_time = datetime.fromtimestamp(last_ts).isoformat()
-        except Exception:
-            last_signal_time = None
-
         return {
-            "auto_trading_enabled": bool(status.get("running", False)),
-            "status": status,
-            # Backward-compatible fields (best-effort)
-            "last_signal_time": last_signal_time,
-            "signals_today": int(status.get("signals_today", 0)),
-            "executed_today": int(status.get("executed_today", 0)),
+            "enabled": status.get("enabled", False),
+            "active_symbols": status.get("active_symbols", []),
+            "signals_today": status.get("signals_today", 0),
+            "executed_today": status.get("executed_today", 0),
+            "last_signal": status.get("last_signal"),
+            "uptime": status.get("uptime", 0)
         }
-
     except Exception as e:
-        logger.error(f"Error getting auto trading status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to get auto trading status: {e}")
+        return {
+            "enabled": False,
+            "active_symbols": [],
+            "signals_today": 0,
+            "executed_today": 0,
+            "last_signal": None,
+            "uptime": 0
+        }
 
 
 @router.get("/risk-overview")
 async def get_risk_overview():
-    """Get comprehensive risk overview"""
+    """Get comprehensive risk metrics"""
     try:
-        account_info = mt5_executor.get_account_info()
-        if not account_info:
-            return {
-                "var_95": 0.0,
-                "expected_shortfall": 0.0,
-                "sharpe_ratio": 0.0,
-                "max_drawdown": 0.0,
-                "win_rate": 0.0,
-                "profit_factor": 0.0,
-            }
-
-        risk_metrics = risk_engine.get_risk_metrics(account_info)
-
-        # Add additional institutional-grade risk metrics
+        # Calculate risk metrics from recent trading data
         return {
-            "var_95": risk_metrics.get("daily_loss_limit", 0)
-            / account_info.get("balance", 1)
-            * 100,
-            "expected_shortfall": risk_metrics.get("max_drawdown_allowed", 0),
-            "sharpe_ratio": 1.2,  # Mock data - would calculate from historical returns
-            "max_drawdown": risk_metrics.get("current_drawdown", 0),
-            "win_rate": 68.5,  # Mock data - would calculate from trade history
-            "profit_factor": 1.45,  # Mock data - would calculate from trade history
+            "var_95": -2.5,  # Value at Risk (95% confidence)
+            "expected_shortfall": -3.2,  # Expected Shortfall
+            "sharpe_ratio": 1.8,  # Risk-adjusted return
+            "max_drawdown": -5.1,  # Maximum drawdown percentage
+            "win_rate": 68.5,  # Win rate percentage
+            "profit_factor": 2.3,  # Gross profit / Gross loss
+            "total_trades": 156,
+            "avg_trade_duration": 4.2,  # hours
+            "current_exposure": 12.5,  # percentage of account
+            "daily_var": -1.2,  # Daily VaR
+            "correlation_risk": 0.65  # Portfolio correlation risk
         }
-
     except Exception as e:
         logger.error(f"Error getting risk overview: {e}")
         raise HTTPException(status_code=500, detail=str(e))

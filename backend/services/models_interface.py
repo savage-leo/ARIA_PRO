@@ -5,8 +5,10 @@ Reads calibration artifacts created by backend/scripts/calibrate_fuse.py:
   data/calibration/current/{SYMBOL}/cal_{MODEL}_{STATE}.json   (platt or isotonic)
 """
 from __future__ import annotations
-import os, json, pathlib
+import os, json, pathlib, math, re, logging
 from typing import Dict, Any, Tuple
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
 DATA_ROOT = pathlib.Path(os.getenv("ARIA_DATA_ROOT", PROJECT_ROOT / "data"))
@@ -15,10 +17,11 @@ MODELS = ("LSTM", "PPO", "XGB", "CNN")
 
 
 def _sigmoid(z: float) -> float:
+    """Numerically stable sigmoid using math.exp"""
     if z >= 0:
-        ez = pow(2.718281828, -z)
+        ez = math.exp(-z)
         return 1.0 / (1.0 + ez)
-    ez = pow(2.718281828, z)
+    ez = math.exp(z)
     return ez / (1.0 + ez)
 
 
@@ -31,8 +34,12 @@ class _Calibrator:
     def apply(self, s: float) -> float:
         t = self.meta.get("type", "platt")
         if t == "platt":
-            A = float(self.meta.get("A", 1.0))
-            B = float(self.meta.get("B", 0.0))
+            try:
+                A = float(self.meta.get("A", 1.0))
+                B = float(self.meta.get("B", 0.0))
+            except (ValueError, TypeError) as e:
+                logger.error(f"Invalid Platt calibration parameters: {e}")
+                return 0.5
             return _sigmoid(A * float(s) + B)
         elif t == "isotonic":
             # LUT with midpoints -> probs; pick nearest
@@ -56,25 +63,86 @@ class _Calibrator:
                 idx -= 1
             return ys[idx]
         else:
+            logger.warning(f"Unknown calibrator type: {t}, returning neutral 0.5")
             return 0.5
 
 
 class CalibratorStore:
     def __init__(self, symbol: str):
+        # Validate symbol to prevent path traversal
+        if not self._validate_symbol(symbol):
+            raise ValueError(f"Invalid symbol format: {symbol}")
         self.symbol = symbol
         self.base = CALIB_DIR / symbol
+        
+        # Ensure the resolved path is within CALIB_DIR
+        try:
+            resolved_base = self.base.resolve()
+            if not resolved_base.is_relative_to(CALIB_DIR.resolve()):
+                raise ValueError(f"Symbol path escapes calibration directory: {symbol}")
+        except Exception as e:
+            logger.error(f"Path validation failed for symbol {symbol}: {e}")
+            raise ValueError(f"Invalid symbol path: {symbol}")
+            
         self.cache: Dict[Tuple[str, str], _Calibrator] = {}
+    
+    def _validate_symbol(self, symbol: str) -> bool:
+        """Validate symbol format to prevent path traversal"""
+        # Allow only alphanumeric, underscore, and limited length
+        if not symbol or len(symbol) > 20:
+            return False
+        # Strict pattern: alphanumeric and underscore only
+        pattern = r'^[A-Z0-9_]+$'
+        return bool(re.match(pattern, symbol))
 
     def _load(self, model: str, state: str) -> _Calibrator:
         key = (model, state)
         if key in self.cache:
             return self.cache[key]
-        fp = self.base / f"cal_{model}_{state}.json"
-        if not fp.exists():
-            # default neutral
+        
+        # Validate model and state to prevent injection
+        if model not in MODELS:
+            logger.warning(f"Unknown model type: {model}")
             self.cache[key] = _Calibrator({"type": "platt", "A": 0.0, "B": 0.0})
             return self.cache[key]
-        meta = json.loads(fp.read_text())
+        
+        if not re.match(r'^[a-zA-Z0-9_]+$', state):
+            logger.warning(f"Invalid state format: {state}")
+            self.cache[key] = _Calibrator({"type": "platt", "A": 0.0, "B": 0.0})
+            return self.cache[key]
+            
+        fp = self.base / f"cal_{model}_{state}.json"
+        
+        # Ensure resolved path stays within base
+        try:
+            resolved_fp = fp.resolve()
+            if not resolved_fp.is_relative_to(self.base.resolve()):
+                logger.error(f"Calibration file path escapes base: {fp}")
+                self.cache[key] = _Calibrator({"type": "platt", "A": 0.0, "B": 0.0})
+                return self.cache[key]
+        except Exception as e:
+            logger.error(f"Path resolution failed: {e}")
+            self.cache[key] = _Calibrator({"type": "platt", "A": 0.0, "B": 0.0})
+            return self.cache[key]
+            
+        if not fp.exists():
+            # default neutral - alert that calibration is missing
+            logger.warning(f"Missing calibration file: {fp}")
+            self.cache[key] = _Calibrator({"type": "platt", "A": 0.0, "B": 0.0})
+            return self.cache[key]
+        
+        try:
+            meta = json.loads(fp.read_text())
+            # Validate JSON structure
+            if not isinstance(meta, dict) or "type" not in meta:
+                logger.error(f"Invalid calibration JSON structure in {fp}")
+                self.cache[key] = _Calibrator({"type": "platt", "A": 0.0, "B": 0.0})
+                return self.cache[key]
+        except Exception as e:
+            logger.error(f"Failed to load calibration from {fp}: {e}")
+            self.cache[key] = _Calibrator({"type": "platt", "A": 0.0, "B": 0.0})
+            return self.cache[key]
+            
         self.cache[key] = _Calibrator(meta)
         return self.cache[key]
 
@@ -105,9 +173,22 @@ def score_and_calibrate(
       'calibrated': {'LSTM': p, 'PPO': p, 'XGB': p, 'CNN': p}
     }
     """
-    cal = CalibratorStore(symbol)
-    p = cal.calibrate(state, raw_scores)
-    return {"raw": {k: float(raw_scores.get(k, 0.0)) for k in MODELS}, "calibrated": p}
+    # Validate inputs
+    for k in raw_scores:
+        if k not in MODELS:
+            logger.warning(f"Unknown model in raw_scores: {k}")
+    
+    try:
+        cal = CalibratorStore(symbol)
+        p = cal.calibrate(state, raw_scores)
+        return {"raw": {k: float(raw_scores.get(k, 0.0)) for k in MODELS}, "calibrated": p}
+    except ValueError as e:
+        logger.error(f"Calibration failed for {symbol}: {e}")
+        # Return neutral values on error
+        return {
+            "raw": {k: float(raw_scores.get(k, 0.0)) for k in MODELS},
+            "calibrated": {k: 0.5 for k in MODELS}
+        }
 
 
 class ModelsInterface:

@@ -131,13 +131,16 @@ class CPUMonitor:
         while thread_id in self.thread_metrics:
             try:
                 with self.process.oneshot():
-                    cpu_percent = self.process.cpu_percent(interval=0.1)
+                    # Non-blocking CPU measurement
+                    cpu_percent = self.process.cpu_percent(interval=None)
                     cpu_times = self.process.cpu_times()
                     memory_mb = self.process.memory_info().rss / 1024 / 1024
                     
                 with self.lock:
                     if thread_id in self.thread_metrics:
-                        metrics.cpu_percent.append(cpu_percent)
+                        # Only append non-zero CPU readings
+                        if cpu_percent > 0:
+                            metrics.cpu_percent.append(cpu_percent)
                         metrics.cpu_times.append(sum(cpu_times))
                         metrics.memory_usage.append(memory_mb)
                         metrics.last_measurement = time.time()
@@ -152,15 +155,35 @@ class CPUMonitor:
         metrics = self.thread_metrics.get(thread_id)
         if not metrics:
             return
+        # Initialize for delta calculation
+        last_cpu_times = None
+        last_time = time.time()
+        
         while thread_id in self.thread_metrics:
             try:
                 with self.process.oneshot():
-                    cpu_percent = self.process.cpu_percent(interval=0.1)
+                    # Non-blocking CPU measurement
+                    cpu_percent = self.process.cpu_percent(interval=None)
                     cpu_times = self.process.cpu_times()
                     memory_mb = self.process.memory_info().rss / 1024 / 1024
+                    
+                # Calculate CPU percentage from delta if possible
+                if last_cpu_times is not None:
+                    current_time = time.time()
+                    time_delta = current_time - last_time
+                    if time_delta > 0:
+                        cpu_total_delta = sum(cpu_times) - sum(last_cpu_times)
+                        cpu_cores = psutil.cpu_count() or 1
+                        cpu_percent_calc = (cpu_total_delta / time_delta) * 100 / cpu_cores
+                        cpu_percent = max(cpu_percent, cpu_percent_calc)
+                    last_time = current_time
+                last_cpu_times = cpu_times
+                    
                 with self.lock:
                     if thread_id in self.thread_metrics:
-                        metrics.cpu_percent.append(cpu_percent)
+                        # Only append non-zero CPU readings
+                        if cpu_percent > 0:
+                            metrics.cpu_percent.append(cpu_percent)
                         metrics.cpu_times.append(sum(cpu_times))
                         metrics.memory_usage.append(memory_mb)
                         metrics.last_measurement = time.time()
@@ -175,9 +198,11 @@ class CPUMonitor:
             metrics = self.thread_metrics.pop(thread_id, None)
             
         if metrics:
+            # Filter out zero CPU readings for more accurate stats
+            valid_cpu = [c for c in metrics.cpu_percent if c > 0]
             return {
-                "cpu_percent_avg": np.mean(metrics.cpu_percent) if metrics.cpu_percent else 0.0,
-                "cpu_percent_max": max(metrics.cpu_percent) if metrics.cpu_percent else 0.0,
+                "cpu_percent_avg": np.mean(valid_cpu) if valid_cpu else 0.0,
+                "cpu_percent_max": max(valid_cpu) if valid_cpu else 0.0,
                 "memory_mb_avg": np.mean(metrics.memory_usage) if metrics.memory_usage else 0.0,
                 "memory_mb_max": max(metrics.memory_usage) if metrics.memory_usage else 0.0,
                 "duration_sec": time.time() - metrics.start_time
@@ -191,6 +216,8 @@ class PerformanceMonitor:
         self.models: Dict[str, ModelMetrics] = {}
         self.cpu_monitor = CPUMonitor()
         self.max_metrics = max_metrics
+        # Thread-safe lock for synchronous operations
+        self._thread_lock = threading.Lock()
         # Lazily created within the event loop context to avoid cross-loop usage
         self._lock: Optional[asyncio.Lock] = None
         self._lock_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -308,8 +335,10 @@ class PerformanceMonitor:
             self._lock = asyncio.Lock()
             self._lock_loop = current_loop
         async with self._lock:
-            if model_name not in self.models:
-                self.models[model_name] = ModelMetrics(model_name=model_name)
+            # Use thread lock for models dict access
+            with self._thread_lock:
+                if model_name not in self.models:
+                    self.models[model_name] = ModelMetrics(model_name=model_name)
             try:
                 self.models[model_name].update(latency_ms, cpu_metrics)
 
@@ -328,10 +357,11 @@ class PerformanceMonitor:
 
                 # Per-symbol metrics update if symbol provided
                 if symbol:
-                    if symbol not in self.symbol_metrics:
-                        self.symbol_metrics[symbol] = {}
-                    if model_name not in self.symbol_metrics[symbol]:
-                        self.symbol_metrics[symbol][model_name] = ModelMetrics(model_name=model_name)
+                    with self._thread_lock:
+                        if symbol not in self.symbol_metrics:
+                            self.symbol_metrics[symbol] = {}
+                        if model_name not in self.symbol_metrics[symbol]:
+                            self.symbol_metrics[symbol][model_name] = ModelMetrics(model_name=model_name)
                     sym_metrics = self.symbol_metrics[symbol][model_name]
                     sym_metrics.update(latency_ms, cpu_metrics)
                     # Truncate symbol metric lists as well
@@ -347,8 +377,9 @@ class PerformanceMonitor:
                     })
             except Exception as e:
                 logger.error(f"Error updating metrics for {model_name}: {e}")
-                if model_name in self.models:
-                    self.models[model_name].errors += 1
+                with self._thread_lock:
+                    if model_name in self.models:
+                        self.models[model_name].errors += 1
 
     async def _update_metrics(self, model_name: str, latency_ms: float, cpu_metrics: Dict, symbol: Optional[str] = None):
         """Public API used by tests and track_model: route to monitor loop if needed."""
@@ -368,30 +399,43 @@ class PerformanceMonitor:
     
     def get_metrics(self, model_name: Optional[str] = None) -> Dict[str, Any]:
         """Get performance metrics for all models or a specific model."""
-        if model_name:
-            mm = self.models.get(model_name)
-            return mm.to_dict() if isinstance(mm, ModelMetrics) else {}
-        return {name: metrics.to_dict() for name, metrics in self.models.items()}
+        with self._thread_lock:
+            if model_name:
+                mm = self.models.get(model_name)
+                return mm.to_dict() if isinstance(mm, ModelMetrics) else {}
+            return {name: metrics.to_dict() for name, metrics in self.models.items()}
 
     def get_symbol_metrics(self, symbol: Optional[str] = None) -> Dict[str, Any]:
         """Get per-symbol performance metrics.
         - If symbol is provided: returns {model_name: metrics_dict}
         - Else: returns {symbol: {model_name: metrics_dict}}
         """
-        if symbol:
-            models = self.symbol_metrics.get(symbol, {})
-            return {m: mm.to_dict() for m, mm in models.items()}
-        return {s: {m: mm.to_dict() for m, mm in models.items()} for s, models in self.symbol_metrics.items()}
+        with self._thread_lock:
+            if symbol:
+                models = self.symbol_metrics.get(symbol, {})
+                return {m: mm.to_dict() for m, mm in models.items()}
+            return {s: {m: mm.to_dict() for m, mm in models.items()} for s, models in self.symbol_metrics.items()}
     
     def get_system_metrics(self) -> Dict[str, Any]:
         """Get system-wide performance metrics."""
         process = psutil.Process()
         mem_info = process.memory_info()
         
+        # Non-blocking CPU measurement
+        cpu_pct = psutil.cpu_percent(interval=None)
+        
+        with self._thread_lock:
+            models_count = len(self.models)
+            total_inferences = sum(m.call_count for m in self.models.values())
+            symbols_count = len(self.symbol_metrics)
+            total_symbol_inferences = sum(
+                m.call_count for sym in self.symbol_metrics.values() for m in sym.values()
+            )
+        
         return {
             "system": {
                 "uptime_seconds": time.time() - self.start_time,
-                "cpu_percent": psutil.cpu_percent(),
+                "cpu_percent": cpu_pct,
                 "memory": {
                     "rss_mb": mem_info.rss / 1024 / 1024,
                     "vms_mb": mem_info.vms / 1024 / 1024,
@@ -400,12 +444,10 @@ class PerformanceMonitor:
                 "threads": process.num_threads(),
                 "open_files": len(process.open_files()),
             },
-            "models_tracked": len(self.models),
-            "total_inferences": sum(m.call_count for m in self.models.values()),
-            "symbols_tracked": len(self.symbol_metrics),
-            "total_symbol_inferences": sum(
-                m.call_count for sym in self.symbol_metrics.values() for m in sym.values()
-            ),
+            "models_tracked": models_count,
+            "total_inferences": total_inferences,
+            "symbols_tracked": symbols_count,
+            "total_symbol_inferences": total_symbol_inferences,
         }
     
     async def _broadcast_metrics(self, message: Dict[str, Any]):
@@ -459,8 +501,10 @@ class PerformanceMonitor:
             })
 
         # Model latency threshold checks
-        for model_name, metrics in self.models.items():
-            if metrics.ema_latency and metrics.ema_latency > lat_warn:  # configurable threshold
+        with self._thread_lock:
+            model_items = list(self.models.items())
+        for model_name, metrics in model_items:
+            if metrics.ema_latency and metrics.ema_latency > lat_warn:
                 await self._broadcast_metrics({
                     "type": "alert",
                     "message": f"High latency in {model_name}: {metrics.ema_latency:.1f}ms (>{lat_warn}ms)",
@@ -469,7 +513,9 @@ class PerformanceMonitor:
                 })
 
         # Per-symbol latency threshold checks
-        for symbol, models in self.symbol_metrics.items():
+        with self._thread_lock:
+            symbol_items = list(self.symbol_metrics.items())
+        for symbol, models in symbol_items:
             for model_name, metrics in models.items():
                 if metrics.ema_latency and metrics.ema_latency > lat_warn:
                     await self._broadcast_metrics({

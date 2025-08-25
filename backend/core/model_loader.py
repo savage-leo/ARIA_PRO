@@ -91,7 +91,7 @@ class ARIAModels:
 
     def load_all(self):
         """Load all available Phase-4 real models"""
-        print("[ARIA] Loading Phase-4 real models...")
+        logger.info("[ARIA] Loading Phase-4 real models...")
 
         try:
             # --- 1. LSTM Forex Predictor ---
@@ -101,7 +101,7 @@ class ARIAModels:
                     import onnxruntime as ort
 
                     self.lstm = ort.InferenceSession(lstm_path)
-                    print("[ARIA] LSTM model loaded.")
+                    logger.info("[ARIA] LSTM model loaded.")
                 except Exception as e:
                     logger.warning(f"Failed to load LSTM model: {e}")
 
@@ -112,7 +112,7 @@ class ARIAModels:
                     import onnxruntime as ort
 
                     self.cnn = ort.InferenceSession(cnn_path)
-                    print("[ARIA] CNN pattern model loaded.")
+                    logger.info("[ARIA] CNN pattern model loaded.")
                 except Exception as e:
                     logger.warning(f"Failed to load CNN model: {e}")
 
@@ -123,7 +123,7 @@ class ARIAModels:
                     import onnxruntime as ort
 
                     self.visual_ai = ort.InferenceSession(visual_path)
-                    print("[ARIA] Visual AI model loaded.")
+                    logger.info("[ARIA] Visual AI model loaded.")
                 except Exception as e:
                     logger.warning(f"Failed to load Visual AI model: {e}")
 
@@ -144,7 +144,7 @@ class ARIAModels:
                             module="stable_baselines3.*",
                         )
                         self.ppo = PPO.load(ppo_path)
-                    print("[ARIA] PPO trading agent loaded.")
+                    logger.info("[ARIA] PPO trading agent loaded.")
                 except Exception as e:
                     logger.warning(f"Failed to load PPO model: {e}")
 
@@ -152,7 +152,7 @@ class ARIAModels:
             try:
                 self.xgb = XGBoostONNXAdapter()
                 self.xgb.load()
-                print("[ARIA] XGBoost ONNX model ready.")
+                logger.info("[ARIA] XGBoost ONNX model ready.")
             except Exception as e:
                 logger.warning(f"Failed to initialize XGBoost adapter: {e}")
 
@@ -168,12 +168,12 @@ class ARIAModels:
                         n_ctx=2048,
                         n_gpu_layers=0,  # CPU only for now
                     )
-                    print("[ARIA] LLM Macro model loaded.")
+                    logger.info("[ARIA] LLM Macro model loaded.")
                 except Exception as e:
                     logger.warning(f"Failed to load LLM model: {e}")
 
             self.models_loaded = True
-            print("[ARIA] All available Phase-4 models initialized.")
+            logger.info("[ARIA] All available Phase-4 models initialized.")
 
         except Exception as e:
             logger.error(f"Error during model loading: {e}")
@@ -564,15 +564,15 @@ class ModelLoader:
 # Auto-load models on import
 if __name__ == "__main__":
     # Test both systems
-    print("Testing legacy models...")
+    logger.info("Testing legacy models...")
     aria_models.load_all()
-    print("Legacy model status:", aria_models.get_model_status())
+    logger.info(f"Legacy model status: {aria_models.get_model_status()}")
     
-    print("\nTesting cached models...")
-    print("Cache stats:", cached_models.get_cache_stats())
+    logger.info("Testing cached models...")
+    logger.info(f"Cache stats: {cached_models.get_cache_stats()}")
     
-    print("\nTesting hot-swap manager...")
-    print("Swap status:", hot_swap_manager.get_swap_status())
+    logger.info("Testing hot-swap manager...")
+    logger.info(f"Swap status: {hot_swap_manager.get_swap_status()}")
 else:
     # Production: use cached models by default
     pass

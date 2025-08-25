@@ -176,9 +176,13 @@ async def send_market_data(connection_id: str, symbol: str, pool):
         if cached_data:
             market_data = cached_data
         else:
-            # Get live data
-            mt5_service = MT5MarketDataService()
-            market_data = await mt5_service.get_last_bar(symbol)
+            # Get live data from MT5MarketFeed
+            from backend.services.mt5_market_data import get_mt5_market_feed
+            mt5_feed = get_mt5_market_feed()
+            if mt5_feed:
+                market_data = await mt5_feed.get_last_bar(symbol)
+            else:
+                market_data = None
             
             # Cache the data
             if market_data:
@@ -276,8 +280,13 @@ async def periodic_data_broadcast():
             # Broadcast market data
             for symbol in symbols:
                 try:
-                    mt5_service = MT5MarketDataService()
-                    market_data = await mt5_service.get_last_bar(symbol)
+                    # Get live data from MT5MarketFeed
+                    from backend.services.mt5_market_data import get_mt5_market_feed
+                    mt5_feed = get_mt5_market_feed()
+                    if mt5_feed:
+                        market_data = await mt5_feed.get_last_bar(symbol)
+                    else:
+                        market_data = None
                     
                     if market_data:
                         message = {
