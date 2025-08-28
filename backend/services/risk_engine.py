@@ -1,11 +1,15 @@
 import logging
 import asyncio
 import threading
-from typing import Dict, Any, Optional, List
+import os
+import numpy as np
+from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timedelta
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from enum import Enum
 import json
+from collections import deque
+from scipy import stats
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +28,40 @@ class RiskConfig:
     max_exposure: float  # Maximum total exposure as % of account
     max_slippage: float  # Maximum allowed slippage in pips
     position_timeout: int  # Position timeout in minutes
+    var_confidence: float = 0.95  # VaR confidence level
+    cvar_confidence: float = 0.99  # CVaR confidence level
+    correlation_threshold: float = 0.7  # Correlation risk threshold
+    kelly_fraction: float = 0.25  # Kelly criterion fraction
+    max_leverage: float = 10.0  # Maximum leverage
+    stress_test_scenarios: int = 1000  # Monte Carlo scenarios
+
+@dataclass
+class PositionMetrics:
+    symbol: str
+    entry_time: datetime
+    entry_price: float
+    current_price: float
+    position_size: float
+    unrealized_pnl: float
+    realized_pnl: float
+    duration_minutes: int
+    max_favorable_excursion: float
+    max_adverse_excursion: float
+
+@dataclass
+class RiskMetrics:
+    var_1d: float  # 1-day Value at Risk
+    cvar_1d: float  # 1-day Conditional VaR
+    sharpe_ratio: float
+    sortino_ratio: float
+    max_drawdown: float
+    current_drawdown: float
+    win_rate: float
+    profit_factor: float
+    avg_win: float
+    avg_loss: float
+    correlation_risk: float
+    kelly_optimal_size: float
 
 
 class RiskEngine:
@@ -32,6 +70,9 @@ class RiskEngine:
         self._state_lock = threading.Lock()
         self._async_lock = asyncio.Lock()
         self._kill_switch_lock = threading.Lock()
+        
+        # Load configuration from environment
+        self._load_config_from_env()
         
         self.risk_configs = {
             RiskLevel.CONSERVATIVE: RiskConfig(
@@ -69,6 +110,30 @@ class RiskEngine:
         self.kill_switch_engaged = False
         self.kill_switch_reason = ""
         self._last_update = datetime.now()
+        
+        # Advanced analytics state
+        self.pnl_history = deque(maxlen=1000)  # Rolling PnL history
+        self.returns_history = deque(maxlen=252)  # Daily returns for 1 year
+        self.position_metrics: Dict[str, PositionMetrics] = {}
+        self.correlation_matrix = {}
+        self.stress_test_results = {}
+        self._last_risk_calculation = datetime.now()
+        self._risk_calculation_interval = timedelta(minutes=5)
+
+    def _load_config_from_env(self):
+        """Load risk configuration from environment variables"""
+        self.env_config = {
+            'max_position_size_conservative': float(os.environ.get('RISK_MAX_POS_SIZE_CONSERVATIVE', '1.0')),
+            'max_position_size_moderate': float(os.environ.get('RISK_MAX_POS_SIZE_MODERATE', '2.0')),
+            'max_position_size_aggressive': float(os.environ.get('RISK_MAX_POS_SIZE_AGGRESSIVE', '3.0')),
+            'max_daily_loss_conservative': float(os.environ.get('RISK_MAX_DAILY_LOSS_CONSERVATIVE', '2.0')),
+            'max_daily_loss_moderate': float(os.environ.get('RISK_MAX_DAILY_LOSS_MODERATE', '3.0')),
+            'max_daily_loss_aggressive': float(os.environ.get('RISK_MAX_DAILY_LOSS_AGGRESSIVE', '5.0')),
+            'var_confidence': float(os.environ.get('RISK_VAR_CONFIDENCE', '0.95')),
+            'cvar_confidence': float(os.environ.get('RISK_CVAR_CONFIDENCE', '0.99')),
+            'kelly_fraction': float(os.environ.get('RISK_KELLY_FRACTION', '0.25')),
+            'correlation_threshold': float(os.environ.get('RISK_CORRELATION_THRESHOLD', '0.7')),
+        }
 
     def set_risk_level(self, level: RiskLevel):
         """Set the current risk level"""
@@ -346,6 +411,144 @@ class RiskEngine:
                 return True
 
             return False
+
+    def calculate_var(self, confidence: float = None) -> float:
+        """Calculate Value at Risk using historical simulation"""
+        if not self.returns_history:
+            return 0.0
+        
+        confidence = confidence or self.env_config.get('var_confidence', 0.95)
+        returns = np.array(self.returns_history)
+        
+        if len(returns) < 30:  # Need minimum data
+            return 0.0
+        
+        # Calculate VaR using percentile method
+        var_percentile = (1 - confidence) * 100
+        var = np.percentile(returns, var_percentile)
+        return abs(var)
+
+    def calculate_cvar(self, confidence: float = None) -> float:
+        """Calculate Conditional Value at Risk (Expected Shortfall)"""
+        if not self.returns_history:
+            return 0.0
+        
+        confidence = confidence or self.env_config.get('cvar_confidence', 0.99)
+        returns = np.array(self.returns_history)
+        
+        if len(returns) < 30:
+            return 0.0
+        
+        # Calculate CVaR as mean of returns below VaR threshold
+        var_threshold = np.percentile(returns, (1 - confidence) * 100)
+        tail_returns = returns[returns <= var_threshold]
+        
+        if len(tail_returns) == 0:
+            return 0.0
+        
+        return abs(np.mean(tail_returns))
+
+    def calculate_sharpe_ratio(self, risk_free_rate: float = 0.02) -> float:
+        """Calculate Sharpe ratio"""
+        if len(self.returns_history) < 30:
+            return 0.0
+        
+        returns = np.array(self.returns_history)
+        excess_returns = returns - (risk_free_rate / 252)  # Daily risk-free rate
+        
+        if np.std(excess_returns) == 0:
+            return 0.0
+        
+        return np.mean(excess_returns) / np.std(excess_returns) * np.sqrt(252)
+
+    def calculate_sortino_ratio(self, risk_free_rate: float = 0.02) -> float:
+        """Calculate Sortino ratio (downside deviation)"""
+        if len(self.returns_history) < 30:
+            return 0.0
+        
+        returns = np.array(self.returns_history)
+        excess_returns = returns - (risk_free_rate / 252)
+        
+        # Calculate downside deviation
+        negative_returns = excess_returns[excess_returns < 0]
+        if len(negative_returns) == 0:
+            return float('inf')
+        
+        downside_deviation = np.std(negative_returns)
+        if downside_deviation == 0:
+            return 0.0
+        
+        return np.mean(excess_returns) / downside_deviation * np.sqrt(252)
+
+    def calculate_kelly_optimal_size(self, win_rate: float, avg_win: float, avg_loss: float) -> float:
+        """Calculate Kelly optimal position size"""
+        if avg_loss == 0 or win_rate <= 0 or win_rate >= 1:
+            return 0.0
+        
+        # Kelly formula: f = (bp - q) / b
+        # where b = avg_win/avg_loss, p = win_rate, q = 1-win_rate
+        b = abs(avg_win / avg_loss)
+        p = win_rate
+        q = 1 - win_rate
+        
+        kelly_fraction = (b * p - q) / b
+        
+        # Apply safety factor
+        safety_factor = self.env_config.get('kelly_fraction', 0.25)
+        return max(0, min(kelly_fraction * safety_factor, 0.25))
+
+    def get_comprehensive_risk_metrics(self) -> RiskMetrics:
+        """Calculate comprehensive risk metrics"""
+        with self._state_lock:
+            # Calculate basic metrics
+            var_1d = self.calculate_var()
+            cvar_1d = self.calculate_cvar()
+            sharpe = self.calculate_sharpe_ratio()
+            sortino = self.calculate_sortino_ratio()
+            
+            # Calculate win rate and profit metrics
+            winning_trades = [p for p in self.pnl_history if p > 0]
+            losing_trades = [p for p in self.pnl_history if p < 0]
+            
+            win_rate = len(winning_trades) / len(self.pnl_history) if self.pnl_history else 0.0
+            avg_win = np.mean(winning_trades) if winning_trades else 0.0
+            avg_loss = abs(np.mean(losing_trades)) if losing_trades else 0.0
+            profit_factor = (sum(winning_trades) / abs(sum(losing_trades))) if losing_trades else 0.0
+            
+            # Calculate drawdown
+            if self.pnl_history:
+                cumulative_pnl = np.cumsum(self.pnl_history)
+                running_max = np.maximum.accumulate(cumulative_pnl)
+                drawdown = (cumulative_pnl - running_max) / running_max
+                max_drawdown = abs(np.min(drawdown)) if len(drawdown) > 0 else 0.0
+                current_drawdown = abs(drawdown[-1]) if len(drawdown) > 0 else 0.0
+            else:
+                max_drawdown = current_drawdown = 0.0
+            
+            # Calculate Kelly optimal size
+            kelly_optimal = self.calculate_kelly_optimal_size(win_rate, avg_win, avg_loss)
+            
+            return RiskMetrics(
+                var_1d=var_1d,
+                cvar_1d=cvar_1d,
+                sharpe_ratio=sharpe,
+                sortino_ratio=sortino,
+                max_drawdown=max_drawdown,
+                current_drawdown=current_drawdown,
+                win_rate=win_rate,
+                profit_factor=profit_factor,
+                avg_win=avg_win,
+                avg_loss=avg_loss,
+                correlation_risk=0.0,
+                kelly_optimal_size=kelly_optimal
+            )
+
+    def add_trade_result(self, pnl: float, return_pct: float) -> None:
+        """Add trade result to history for analytics"""
+        with self._state_lock:
+            self.pnl_history.append(pnl)
+            self.returns_history.append(return_pct)
+            self.daily_pnl += pnl
 
 
 # Global risk engine instance

@@ -65,6 +65,21 @@ env/
 .Trashes
 ehthumbs.db
 Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.stackdump
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
 
 # Logs
 logs/
@@ -74,6 +89,14 @@ yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 .pnpm-debug.log*
+backend_*.log
+backend_*.err
+backend_*.out
+*.log.*
+logs.txt
+*.log.*
+*.log.*.*
+log/
 
 # Runtime data
 pids
@@ -142,6 +165,8 @@ storybook-static
 # Temporary folders
 tmp/
 temp/
+.temp/
+.tmp/
 
 # Editor directories and files
 .vscode/*
@@ -152,6 +177,13 @@ temp/
 *.njsproj
 *.sln
 *.sw?
+*.code-workspace
+*.sublime-workspace
+*.sublime-project
+.project
+.pydevproject
+.settings/
+.ropeproject/
 
 # Trading specific
 *.ex4
@@ -160,14 +192,22 @@ temp/
 *.mq5
 /MQL4/
 /MQL5/
+*.set
+*.chk
+*.tpl
 
-# Model files (too large for git)
+# Model files (too large for git - use Git LFS for versioning these)
 *.h5
 *.pkl
 *.joblib
 *.model
+*.onnx
+*.gguf
+*.bin
 models/weights/
 models/checkpoints/
+!backend/models/llm_macro.gguf
+!backend/models/visual_ai.onnx
 
 # Data files
 *.csv
@@ -175,6 +215,9 @@ models/checkpoints/
 *.parquet
 data/raw/
 data/processed/
+data/telemetry/
+!data/telemetry/metrics_2025*.jsonl  # Keep recent telemetry files
+data/audit_trail.db
 
 # C++ build artifacts
 *.o
@@ -198,6 +241,9 @@ htmlcov/
 .nox/
 coverage.xml
 *.cover
+.mypy_cache/
+.ropeproject
+.hypothesis/
 *.py,cover
 .hypothesis/
 

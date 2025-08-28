@@ -7,8 +7,10 @@ import asyncio
 import time
 import logging
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
+from collections import deque
+from dataclasses import dataclass
 
 # Import the cached model loader for 10x speedup
 from backend.core.model_loader import cached_models, ModelLoader
@@ -29,6 +31,15 @@ from backend.core.performance_monitor import track_performance
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class ModelPerformanceMetrics:
+    model_name: str
+    success_rate: float
+    avg_latency_ms: float
+    error_count: int
+    last_success: Optional[datetime]
+    circuit_breaker_active: bool
+
 class RealAISignalGenerator:
     def __init__(self):
         self.running = False
@@ -38,12 +49,31 @@ class RealAISignalGenerator:
         self.smc_engines = {}
         self.enhanced_engines = {}
         self.last_analysis_time = {}
+        
+        # Circuit breaker configuration
+        self.model_circuit_breakers = {}
+        self.circuit_breaker_threshold = 0.7  # 70% failure rate triggers breaker
+        self.circuit_breaker_window = 100  # Number of recent calls to consider
+        self.circuit_breaker_cooldown = 300  # 5 minutes cooldown
+        
+        # Performance monitoring
+        self.model_performance: Dict[str, ModelPerformanceMetrics] = {}
+        self.inference_history = deque(maxlen=1000)
+        self.error_history = deque(maxlen=100)
+        
+        # Adaptive frequency control
+        self.base_analysis_interval = 30  # Base 30 seconds
+        self.adaptive_intervals = {}  # Per-symbol adaptive intervals
+        self.market_activity_threshold = 0.001  # Price change threshold for activity
 
         # Initialize parallel inference engine for 50ms latency
         self.parallel_engine = get_parallel_engine()
         self.neural_journal = get_neural_journal()
         self.microstructure_alpha = get_microstructure_alpha()
         logger.info("Parallel inference engine initialized for 50ms latency")
+        
+        # Initialize model performance tracking
+        self._initialize_model_performance_tracking()
 
         # Initialize enhanced SMC engines for each symbol
         for symbol in self.symbols:
@@ -53,6 +83,135 @@ class RealAISignalGenerator:
 
             # Register with feedback service
             feedback_service.register_engine(symbol, enhanced_engine)
+
+    def _initialize_model_performance_tracking(self):
+        """Initialize performance tracking for all models"""
+        model_names = ["xgb", "lstm", "cnn", "ppo", "vision", "llm_macro"]
+        for model_name in model_names:
+            self.model_performance[model_name] = ModelPerformanceMetrics(
+                model_name=model_name,
+                success_rate=1.0,
+                avg_latency_ms=0.0,
+                error_count=0,
+                last_success=None,
+                circuit_breaker_active=False
+            )
+
+    def _check_circuit_breaker(self, model_name: str) -> bool:
+        """Check if circuit breaker is active for a model"""
+        if model_name not in self.model_performance:
+            return False
+        
+        metrics = self.model_performance[model_name]
+        
+        # Check if cooldown period has passed
+        if metrics.circuit_breaker_active and metrics.last_success:
+            cooldown_elapsed = (datetime.now() - metrics.last_success).total_seconds()
+            if cooldown_elapsed > self.circuit_breaker_cooldown:
+                metrics.circuit_breaker_active = False
+                logger.info(f"Circuit breaker reset for model {model_name}")
+        
+        return metrics.circuit_breaker_active
+
+    def _update_model_performance(self, model_name: str, success: bool, latency_ms: float):
+        """Update model performance metrics and check circuit breaker"""
+        if model_name not in self.model_performance:
+            return
+        
+        metrics = self.model_performance[model_name]
+        
+        # Update metrics
+        if success:
+            metrics.last_success = datetime.now()
+            metrics.success_rate = min(1.0, metrics.success_rate * 0.99 + 0.01)
+        else:
+            metrics.error_count += 1
+            metrics.success_rate = max(0.0, metrics.success_rate * 0.99)
+        
+        # Update average latency
+        if latency_ms > 0:
+            if metrics.avg_latency_ms == 0:
+                metrics.avg_latency_ms = latency_ms
+            else:
+                metrics.avg_latency_ms = metrics.avg_latency_ms * 0.9 + latency_ms * 0.1
+        
+        # Check circuit breaker threshold
+        if metrics.success_rate < self.circuit_breaker_threshold and not metrics.circuit_breaker_active:
+            metrics.circuit_breaker_active = True
+            logger.warning(f"Circuit breaker engaged for model {model_name} (success rate: {metrics.success_rate:.2f})")
+
+    def _calculate_adaptive_interval(self, symbol: str, price_change: float) -> float:
+        """Calculate adaptive analysis interval based on market activity"""
+        base_interval = self.base_analysis_interval
+        
+        # Increase frequency during high activity
+        if abs(price_change) > self.market_activity_threshold * 2:
+            return base_interval * 0.5  # 15 seconds
+        elif abs(price_change) > self.market_activity_threshold:
+            return base_interval * 0.75  # 22.5 seconds
+        else:
+            return base_interval * 1.5  # 45 seconds during low activity
+
+    async def _safe_model_inference(self, model_name: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Safely execute model inference with circuit breaker and performance tracking"""
+        if self._check_circuit_breaker(model_name):
+            logger.debug(f"Skipping {model_name} inference - circuit breaker active")
+            return None
+        
+        start_time = time.time()
+        try:
+            # Execute model inference with timeout
+            result = await asyncio.wait_for(
+                self._execute_model_inference(model_name, data),
+                timeout=5.0  # 5 second timeout
+            )
+            
+            latency_ms = (time.time() - start_time) * 1000
+            self._update_model_performance(model_name, True, latency_ms)
+            
+            return result
+            
+        except asyncio.TimeoutError:
+            logger.warning(f"Model {model_name} inference timeout")
+            self._update_model_performance(model_name, False, 0)
+            return None
+        except Exception as e:
+            logger.error(f"Model {model_name} inference error: {e}")
+            self._update_model_performance(model_name, False, 0)
+            return None
+
+    async def _execute_model_inference(self, model_name: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute actual model inference - placeholder for model-specific logic"""
+        # This would contain the actual model inference logic
+        # For now, return a mock result
+        await asyncio.sleep(0.1)  # Simulate inference time
+        return {
+            "model": model_name,
+            "signal": np.random.choice([-1, 0, 1]),
+            "confidence": np.random.random(),
+            "timestamp": datetime.now()
+        }
+
+    def get_model_performance_summary(self) -> Dict[str, Any]:
+        """Get comprehensive model performance summary"""
+        summary = {}
+        for model_name, metrics in self.model_performance.items():
+            summary[model_name] = {
+                "success_rate": metrics.success_rate,
+                "avg_latency_ms": metrics.avg_latency_ms,
+                "error_count": metrics.error_count,
+                "circuit_breaker_active": metrics.circuit_breaker_active,
+                "last_success": metrics.last_success.isoformat() if metrics.last_success else None
+            }
+        
+        # Add system-wide metrics
+        summary["system"] = {
+            "total_inferences": len(self.inference_history),
+            "recent_errors": len(self.error_history),
+            "avg_system_latency": np.mean([h["latency"] for h in self.inference_history]) if self.inference_history else 0
+        }
+        
+        return summary
 
     @track_performance("RealAISignalGenerator.start")
     async def start(self):

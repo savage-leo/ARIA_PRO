@@ -19,9 +19,9 @@ try:
     env_file = project_root / "production.env"
     if env_file.exists():
         load_dotenv(env_file)
-        print(f"✅ Loaded production environment from {env_file.name}")
+        print(f"[OK] Loaded production environment from {env_file.name}")
 except ImportError:
-    print("⚠️  python-dotenv not available, using environment variables only")
+    print("[WARN] python-dotenv not available, using environment variables only")
 
 # Set essential environment variables if not set (safe defaults)
 defaults = {
@@ -52,7 +52,7 @@ try:
     uvicorn.run(
         app,
         host="127.0.0.1",
-        port=8000,
+        port=8100,
         reload=False,  # Set to True for development
         log_level="info",
         access_log=True

@@ -79,15 +79,24 @@ class AutoTrader:
         self.daily_pnl: float = 0.0
         self.circuit_breaker_active: bool = False
         self.circuit_breaker_reason: str = ""
+        self.circuit_breaker_cooldown_sec: int = int(os.environ.get("AUTO_TRADE_CB_COOLDOWN", "3600"))  # 1 hour
+        self.circuit_breaker_engaged_at: Optional[float] = None
+        self.auto_reset_circuit_breaker: bool = bool(int(os.environ.get("AUTO_TRADE_CB_AUTO_RESET", "1")))
         
-        # Position limits
-        self.max_positions_per_symbol: int = int(os.environ.get("AUTO_TRADE_MAX_POS_SYMBOL", "1"))
+        # Configurable position limits per symbol
+        self.position_limits_per_symbol: Dict[str, int] = self._parse_position_limits(
+            os.environ.get("AUTO_TRADE_POS_LIMITS", "")
+        )
+        self.default_max_positions_per_symbol: int = int(os.environ.get("AUTO_TRADE_MAX_POS_SYMBOL", "1"))
         self.max_total_positions: int = int(os.environ.get("AUTO_TRADE_MAX_TOTAL_POS", "5"))
         self.active_positions: Dict[str, int] = {}
         
-        # Timeout configuration
-        self.order_timeout_sec: float = float(os.environ.get("AUTO_TRADE_ORDER_TIMEOUT", "5.0"))
+        # Adaptive timeout configuration
+        self.base_order_timeout: float = float(os.environ.get("AUTO_TRADE_ORDER_TIMEOUT", "5.0"))
+        self.max_order_timeout: float = float(os.environ.get("AUTO_TRADE_MAX_ORDER_TIMEOUT", "30.0"))
         self.signal_timeout_sec: float = float(os.environ.get("AUTO_TRADE_SIGNAL_TIMEOUT", "10.0"))
+        self.volatility_timeout_multiplier: float = float(os.environ.get("AUTO_TRADE_VOL_TIMEOUT_MULT", "2.0"))
+        self.current_timeouts: Dict[str, float] = {}
         # Fusion/regime gating params
         self.min_edge: float = float(os.environ.get("AUTO_TRADE_MIN_EDGE", "0.01"))
         self.max_bucket_exposure: int = int(
@@ -136,6 +145,72 @@ class AutoTrader:
     @staticmethod
     def _parse_symbols(text: str) -> List[str]:
         return [s.strip().upper() for s in text.split(",") if s.strip()]
+
+    def _parse_position_limits(self, text: str) -> Dict[str, int]:
+        """Parse position limits in format: EURUSD:2,GBPUSD:3,XAUUSD:1"""
+        limits = {}
+        if not text:
+            return limits
+        
+        for pair in text.split(","):
+            if ":" in pair:
+                symbol, limit = pair.strip().split(":", 1)
+                try:
+                    limits[symbol.strip().upper()] = int(limit.strip())
+                except ValueError:
+                    logger.warning(f"Invalid position limit for {symbol}: {limit}")
+        return limits
+
+    def _get_position_limit(self, symbol: str) -> int:
+        """Get position limit for a specific symbol"""
+        return self.position_limits_per_symbol.get(symbol, self.default_max_positions_per_symbol)
+
+    def _calculate_adaptive_timeout(self, symbol: str, volatility: Optional[float] = None) -> float:
+        """Calculate adaptive timeout based on market volatility"""
+        base_timeout = self.base_order_timeout
+        
+        if volatility is None:
+            # Use cached timeout if no volatility provided
+            return self.current_timeouts.get(symbol, base_timeout)
+        
+        # Adjust timeout based on volatility
+        if volatility > 0.02:  # High volatility threshold (2%)
+            timeout_multiplier = self.volatility_timeout_multiplier
+        elif volatility > 0.01:  # Medium volatility (1%)
+            timeout_multiplier = 1.5
+        else:  # Low volatility
+            timeout_multiplier = 1.0
+        
+        adaptive_timeout = min(base_timeout * timeout_multiplier, self.max_order_timeout)
+        self.current_timeouts[symbol] = adaptive_timeout
+        return adaptive_timeout
+
+    def _check_circuit_breaker_reset(self) -> bool:
+        """Check if circuit breaker should be automatically reset"""
+        if not self.circuit_breaker_active or not self.auto_reset_circuit_breaker:
+            return False
+        
+        if self.circuit_breaker_engaged_at is None:
+            return False
+        
+        elapsed = time.time() - self.circuit_breaker_engaged_at
+        if elapsed >= self.circuit_breaker_cooldown_sec:
+            logger.info(f"Auto-resetting circuit breaker after {elapsed:.0f}s cooldown")
+            self.circuit_breaker_active = False
+            self.circuit_breaker_reason = ""
+            self.circuit_breaker_engaged_at = None
+            return True
+        
+        return False
+
+    def _engage_circuit_breaker(self, reason: str) -> None:
+        """Engage circuit breaker with enhanced logging and cooldown tracking"""
+        if not self.circuit_breaker_active:
+            self.circuit_breaker_active = True
+            self.circuit_breaker_reason = reason
+            self.circuit_breaker_engaged_at = time.time()
+            logger.critical(f"CIRCUIT BREAKER ENGAGED: {reason}")
+            logger.info(f"Auto-reset in {self.circuit_breaker_cooldown_sec}s if enabled")
 
     async def start(self) -> None:
         if self.running:

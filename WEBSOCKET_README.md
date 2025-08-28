@@ -151,8 +151,8 @@ This will start a test broadcaster that simulates real-time data.
 ### 4. Access the Application
 
 - **Frontend**: http://localhost:5173
-- **Backend API**: http://localhost:8000
-- **WebSocket**: ws://localhost:8000/ws
+- **Backend API**: http://localhost:8100
+- **WebSocket**: ws://localhost:8100/ws
 
 ## Integration with Existing Systems
 
@@ -206,9 +206,14 @@ const MyComponent = () => {
 
 ## Security
 
-- WebSocket connections are subject to CORS policies
-- Consider implementing authentication for production use
-- Rate limiting may be added for production environments
+- WebSocket connections require token authentication in production.
+  - Provide token via one of:
+    - Query param: `ws://localhost:8100/ws?token=YOUR_TOKEN`
+    - Header: `Authorization: Bearer YOUR_TOKEN`
+    - Header: `X-ARIA-TOKEN: YOUR_TOKEN`
+  - Valid tokens: `ARIA_WS_TOKEN` or `ADMIN_API_KEY` from `production.env`, or a valid JWT (refresh) token.
+- WebSocket handshake observes CORS and security middleware policies.
+- Rate limiting may be enabled in production environments.
 
 ## Monitoring
 
@@ -231,11 +236,11 @@ The system provides logging for:
 ### Common Issues
 
 1. **Connection Refused**
-   - Ensure backend is running on port 8000
+   - Ensure backend is running on port 8100
    - Check firewall settings
 
 2. **No Data Received**
-   - Verify WebSocket URL in frontend
+   - Verify WebSocket URL in frontend (`ws://localhost:8100/ws`)
    - Check browser console for errors
    - Ensure test broadcaster is running
 
