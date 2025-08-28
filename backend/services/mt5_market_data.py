@@ -5,10 +5,14 @@ import time
 import logging
 import asyncio
 import queue
+import random
 from typing import Callable, Dict, Any, List, Optional
 from backend.services.ws_broadcaster import broadcast_tick, broadcast_bar
 from backend.services.cpp_integration import cpp_service
 from backend.core.config import get_settings
+
+# Exported functions
+__all__ = ["MT5MarketFeed", "get_mt5_market_feed", "get_mt5_market_feed_async", "mt5_market_feed", "FeedUnavailableError"]
 
 logger = logging.getLogger("MT5.MARKET")
 try:
@@ -53,6 +57,10 @@ class MT5MarketFeed:
         self._retry_count = 0
         self._max_retries = 3
         self._retry_delay = 1.0  # Initial retry delay in seconds
+        # Reconnect backoff control (prevents rapid reconnect loops)
+        self._last_connect_attempt: float = 0.0
+        self._reconnect_backoff: float = 1.0
+        self._reconnect_backoff_max: float = 30.0
 
     @property
     def running(self) -> bool:
@@ -66,7 +74,16 @@ class MT5MarketFeed:
                 return False
             if self._connected:
                 return True
-                
+            # Gate connection attempts by exponential backoff window
+            now = time.time()
+            if (now - self._last_connect_attempt) < self._reconnect_backoff:
+                logger.debug(
+                    "Skipping MT5 connect attempt (backoff %.1fs not elapsed)",
+                    self._reconnect_backoff,
+                )
+                return False
+            self._last_connect_attempt = now
+
             # Retry logic with exponential backoff
             retry_delay = self._retry_delay
             for attempt in range(self._max_retries):
@@ -78,6 +95,8 @@ class MT5MarketFeed:
                             time.sleep(retry_delay)
                             retry_delay *= 2  # Exponential backoff
                             continue
+                        # Final failure on initialize: increase outer reconnect backoff and return
+                        self._reconnect_backoff = min(self._reconnect_backoff * 2.0, self._reconnect_backoff_max)
                         return False
                         
                     # Validate and login with credentials
@@ -90,6 +109,8 @@ class MT5MarketFeed:
                         if not login or not password or not server:
                             logger.error("MT5 credentials missing. Login/Password/Server required.")
                             mt5.shutdown()
+                            # Missing credentials: increase outer reconnect backoff and return
+                            self._reconnect_backoff = min(self._reconnect_backoff * 2.0, self._reconnect_backoff_max)
                             return False
                             
                         login_id = int(login)
@@ -101,16 +122,22 @@ class MT5MarketFeed:
                                 time.sleep(retry_delay)
                                 retry_delay *= 2
                                 continue
+                            # Final failure on login: increase outer reconnect backoff and return
+                            self._reconnect_backoff = min(self._reconnect_backoff * 2.0, self._reconnect_backoff_max)
                             return False
                             
                         logger.info(f"MT5 login successful to server {server} (account: {login_id})")
                         self._connected = True
                         self._retry_count = 0  # Reset retry count on success
+                        # Reset reconnect backoff on successful connection
+                        self._reconnect_backoff = 1.0
                         return True
                         
                     except (ValueError, TypeError) as e:
                         logger.error(f"Invalid MT5 credentials format: {e}")
                         mt5.shutdown()
+                        # Increase outer reconnect backoff and return
+                        self._reconnect_backoff = min(self._reconnect_backoff * 2.0, self._reconnect_backoff_max)
                         return False
                         
                 except Exception as e:
@@ -119,6 +146,8 @@ class MT5MarketFeed:
                         time.sleep(retry_delay)
                         retry_delay *= 2
                         continue
+                    # Final unexpected failure: increase outer reconnect backoff and return
+                    self._reconnect_backoff = min(self._reconnect_backoff * 2.0, self._reconnect_backoff_max)
                     return False
                     
             return False
@@ -197,9 +226,11 @@ class MT5MarketFeed:
         while self._running:
             try:
                 if not self._connected and MT5_AVAILABLE:
-                    self.connect()
-                    if not self._connected:
-                        time.sleep(1.0)
+                    ok = self.connect()
+                    if not ok:
+                        # Sleep for current backoff with small jitter to avoid thundering herd
+                        delay = self._reconnect_backoff * (1.0 + random.uniform(-0.1, 0.1))
+                        time.sleep(max(0.5, min(delay, self._reconnect_backoff_max)))
                         continue
                 for sym in list(self._symbols):
                     try:
@@ -240,7 +271,15 @@ class MT5MarketFeed:
                     listeners = list(self._tick_listeners.get(sym, []))
                 for cb in listeners:
                     try:
-                        cb(sym, tick)
+                        # Await or schedule tick callback if coroutine
+if asyncio.iscoroutinefunction(cb):
+    if self._loop is not None:
+        asyncio.run_coroutine_threadsafe(cb(sym, tick), self._loop)
+    else:
+        # fallback: create a new event loop (should not happen in prod)
+        asyncio.run(cb(sym, tick))
+else:
+    cb(sym, tick)
                     except Exception as e:
                         logger.exception(f"Tick callback error for {sym}: {e}")
                 # Broadcast tick to WebSocket clients (best-effort)
@@ -533,3 +572,39 @@ class MT5MarketFeed:
 
 # Global instance
 mt5_market_feed = MT5MarketFeed()
+
+def get_mt5_market_feed():
+    """Get the global MT5 market feed instance"""
+    return mt5_market_feed
+
+async def get_mt5_market_feed_async(symbol: str, timeframe: str = "M1"):
+    """
+    Async generator that yields fresh market data for a symbol.
+    Lazily creates/validates MT5 client on first call.
+    """
+    global mt5_market_feed
+    
+    # Ensure MT5 feed is connected
+    if not mt5_market_feed._connected:
+        if not mt5_market_feed.connect():
+            logger.error(f"Failed to connect MT5 for {symbol}")
+            return
+    
+    # Yield latest bar data
+    try:
+        bar_data = mt5_market_feed.get_last_bar(symbol)
+        yield {
+            "symbol": symbol,
+            "time": bar_data["time"],
+            "open": bar_data["open"],
+            "high": bar_data["high"],
+            "low": bar_data["low"],
+            "close": bar_data["close"],
+            "volume": bar_data["volume"]
+        }
+    except Exception as e:
+        logger.error(f"Error getting market data for {symbol}: {e}")
+        return
+    
+    # Allow other coroutines to run
+    await asyncio.sleep(0)

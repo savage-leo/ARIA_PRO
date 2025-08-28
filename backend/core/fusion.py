@@ -29,8 +29,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from backend.core.calibration import ScoreCalibrator
-from backend.core.regime import Regime, _session_from_ts
+from core.calibration import ScoreCalibrator
+from core.regime import Regime, _session_from_ts
 
 logger = logging.getLogger(__name__)
 

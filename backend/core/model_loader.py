@@ -95,7 +95,7 @@ class ARIAModels:
 
         try:
             # --- 1. LSTM Forex Predictor ---
-            lstm_path = os.path.join(MODELS_DIR, "lstm_forex.onnx")
+            lstm_path = os.path.join(MODELS_DIR, "lstm_eurusd.onnx")
             if os.path.exists(lstm_path):
                 try:
                     import onnxruntime as ort
@@ -104,6 +104,17 @@ class ARIAModels:
                     logger.info("[ARIA] LSTM model loaded.")
                 except Exception as e:
                     logger.warning(f"Failed to load LSTM model: {e}")
+            else:
+                # Fallback to lstm_forex.onnx if lstm_eurusd.onnx doesn't exist
+                lstm_path = os.path.join(MODELS_DIR, "lstm_forex.onnx")
+                if os.path.exists(lstm_path):
+                    try:
+                        import onnxruntime as ort
+
+                        self.lstm = ort.InferenceSession(lstm_path)
+                        logger.info("[ARIA] LSTM model loaded (fallback).")
+                    except Exception as e:
+                        logger.warning(f"Failed to load LSTM model: {e}")
 
             # --- 2. CNN Pattern Detector ---
             cnn_path = os.path.join(MODELS_DIR, "cnn_patterns.onnx")

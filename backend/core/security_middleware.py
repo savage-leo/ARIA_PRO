@@ -102,9 +102,29 @@ class ProductionErrorBoundary(BaseHTTPMiddleware):
 def setup_cors_middleware(app, settings):
     """Configure CORS middleware with production settings"""
     
+    # Development: allow everything for ease of local testing
+    if getattr(settings, "is_development", False):
+        logger.warning("Development mode detected: enabling permissive CORS (allow_origins=['*'])")
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+            expose_headers=[
+                "X-RateLimit-Limit",
+                "X-RateLimit-Remaining", 
+                "X-RateLimit-Reset",
+                "Retry-After"
+            ],
+            max_age=600,
+        )
+        return
+    
+    # Production/Test: use configured origins only
     origins = settings.cors_origins_list
     if not origins:
-        logger.warning("No CORS origins configured - API will reject browser requests")
+        logger.warning("No CORS origins configured - API will reject browser requests in production/test")
         origins = []  # Empty list = no origins allowed
     
     logger.info(f"CORS configured for origins: {origins}")
@@ -125,7 +145,6 @@ def setup_cors_middleware(app, settings):
             "Cache-Control",
             "X-Mx-ReqToken",
             "Keep-Alive",
-            "X-Requested-With",
             "If-Modified-Since",
             "X-CSRFToken"
         ],

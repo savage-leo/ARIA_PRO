@@ -6,16 +6,16 @@ Expose metrics and monitoring data
 from fastapi import APIRouter, Response
 from typing import Dict, Any
 import logging
-from backend.core.prometheus_metrics import get_prometheus_metrics, get_metrics_collector
+from backend.core.prometheus_metrics import get_prometheus_metrics as get_core_metrics, get_metrics_collector
 
 router = APIRouter(prefix="/metrics", tags=["Metrics"])
 logger = logging.getLogger(__name__)
 
 @router.get("/prometheus")
-async def get_prometheus_metrics():
+async def prometheus_export():
     """Get metrics in Prometheus format"""
     try:
-        metrics = get_prometheus_metrics()
+        metrics = get_core_metrics()
         metrics_text = metrics.get_metrics_text()
         
         return Response(
@@ -33,7 +33,7 @@ async def get_prometheus_metrics():
 async def get_metrics_status() -> Dict[str, Any]:
     """Get metrics collection status"""
     try:
-        metrics = get_prometheus_metrics()
+        metrics = get_core_metrics()
         collector = get_metrics_collector()
         
         return {
@@ -85,7 +85,7 @@ async def stop_metrics_collection() -> Dict[str, Any]:
 async def push_metrics() -> Dict[str, Any]:
     """Manually push metrics to gateway"""
     try:
-        metrics = get_prometheus_metrics()
+        metrics = get_core_metrics()
         await metrics.push_metrics()
         
         return {

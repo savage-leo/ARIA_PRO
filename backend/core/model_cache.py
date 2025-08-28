@@ -120,6 +120,12 @@ class ModelCache:
             # Add to cache
             self._add_to_cache(model_key, model, metadata)
             
+            # Add alias for xgboost health check compatibility
+            if model_key == "xgb_forex":
+                self.cache["xgboost"] = model
+                self.metadata["xgboost"] = metadata
+                logger.info(f"Added xgboost alias for {model_key}")
+            
             logger.info(f"Loaded model {model_key} in {load_time:.3f}s ({file_size:.1f} KB)")
             return model
             
@@ -276,6 +282,10 @@ class CachedARIAModels:
                 import onnxruntime as ort
                 path = model_path or str(self.models_dir / "visual_ai.onnx")
                 if os.path.exists(path):
+                    # Check if file is just a placeholder
+                    if os.path.getsize(path) < 100:
+                        logger.warning("Visual AI model file is a placeholder, skipping load")
+                        return None
                     return ort.InferenceSession(path, providers=['CPUExecutionProvider'])
                 return None
             except Exception as e:
@@ -287,6 +297,10 @@ class CachedARIAModels:
                 from llama_cpp import Llama
                 path = model_path or str(self.models_dir / "llm_macro.gguf")
                 if os.path.exists(path):
+                    # Check if file is just a placeholder
+                    if os.path.getsize(path) < 100:
+                        logger.warning("LLM Macro model file is a placeholder, skipping load")
+                        return None
                     return Llama(
                         model_path=path,
                         n_threads=2,

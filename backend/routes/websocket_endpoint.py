@@ -28,6 +28,7 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         # Accept WebSocket connection
         await websocket.accept()
+        logger.info("🔗 New WebSocket client connected: %s", websocket.client)
         
         # Get client info
         client_ip = websocket.client.host if websocket.client else "unknown"
@@ -176,12 +177,13 @@ async def send_market_data(connection_id: str, symbol: str, pool):
         if cached_data:
             market_data = cached_data
         else:
-            # Get live data from MT5MarketFeed
-            from backend.services.mt5_market_data import get_mt5_market_feed
-            mt5_feed = get_mt5_market_feed()
-            if mt5_feed:
-                market_data = await mt5_feed.get_last_bar(symbol)
-            else:
+            # Get live data from MT5MarketFeed using async generator
+            from backend.services.mt5_market_data import get_mt5_market_feed_async
+            try:
+                feed = get_mt5_market_feed_async(symbol)
+                market_data = await anext(feed, None)
+            except Exception as e:
+                logger.error(f"Error getting market data for {symbol}: {e}")
                 market_data = None
             
             # Cache the data
@@ -280,13 +282,10 @@ async def periodic_data_broadcast():
             # Broadcast market data
             for symbol in symbols:
                 try:
-                    # Get live data from MT5MarketFeed
-                    from backend.services.mt5_market_data import get_mt5_market_feed
-                    mt5_feed = get_mt5_market_feed()
-                    if mt5_feed:
-                        market_data = await mt5_feed.get_last_bar(symbol)
-                    else:
-                        market_data = None
+                    # Get live data from MT5MarketFeed using async generator
+                    from backend.services.mt5_market_data import get_mt5_market_feed_async
+                    feed = get_mt5_market_feed_async(symbol)
+                    market_data = await anext(feed, None)
                     
                     if market_data:
                         message = {

@@ -15,10 +15,16 @@ logger = logging.getLogger(__name__)
 def enforce_live_only(settings: Optional[Settings] = None) -> None:
     """Enforce MT5-only live mode.
 
-    - Requires ARIA_ENABLE_MT5=1
+    - Requires ARIA_ENABLE_MT5=1 in production
     - Blocks known simulation/mock/alpha-vantage flags if present and enabled
+    - Skips enforcement in development/test environments
     """
     s = settings or get_settings()
+
+    # Skip live-only enforcement in development/test environments
+    if getattr(s, 'is_development', False) or getattr(s, 'is_test', False):
+        logger.info("Development/Test mode: skipping live-only MT5 enforcement")
+        return
 
     if not s.mt5_enabled:
         raise RuntimeError(

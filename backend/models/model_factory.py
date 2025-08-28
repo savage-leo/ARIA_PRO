@@ -5,6 +5,7 @@ Supports easy addition of new models to the multi-strategy ensemble
 """
 from __future__ import annotations
 import os, pathlib, logging
+import numpy as np
 from typing import Dict, Any, Optional, List, Type
 from abc import ABC, abstractmethod
 
@@ -58,24 +59,121 @@ from backend.services.lightweight_ensemble import (
 )
 
 
-# Mock legacy adapters for compatibility
+# Import real model implementations
+from backend.core.model_loader import ModelLoader
+import os
+MODELS_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
+
+# Real model adapters using cached models
 class LSTMAdapter:
+    def __init__(self):
+        self.model_loader = ModelLoader(use_cache=True)
+    
     def predict(self, data):
+        if isinstance(data, dict) and "series" in data:
+            series = np.array(data["series"], dtype=np.float32)
+            prediction = self.model_loader.models.predict_lstm(series)
+            return prediction if prediction is not None else 0.0
+        elif isinstance(data, np.ndarray):
+            prediction = self.model_loader.models.predict_lstm(data)
+            return prediction if prediction is not None else 0.0
         return 0.0
 
 
 class XGBoostONNXAdapter:
+    def __init__(self):
+        self.model_loader = ModelLoader(use_cache=True)
+    
     def predict(self, data):
+        if isinstance(data, dict):
+            prediction = self.model_loader.models.predict_xgb(data)
+            return prediction if prediction is not None else 0.0
         return 0.0
 
 
 class CNNAdapter:
+    def __init__(self):
+        self.model_loader = ModelLoader(use_cache=True)
+    
     def predict(self, data):
+        if isinstance(data, dict) and "image" in data:
+            image = np.array(data["image"], dtype=np.float32)
+            prediction = self.model_loader.models.predict_cnn(image)
+            return prediction if prediction is not None else 0.0
+        elif isinstance(data, np.ndarray):
+            prediction = self.model_loader.models.predict_cnn(data)
+            return prediction if prediction is not None else 0.0
         return 0.0
 
 
 class PPOAdapter:
+    def __init__(self):
+        self.model_loader = ModelLoader(use_cache=True)
+    
     def predict(self, data):
+        if isinstance(data, dict) and "observation" in data:
+            obs = np.array(data["observation"], dtype=np.float32)
+            prediction = self.model_loader.models.trade_with_ppo(obs)
+            return prediction if prediction is not None else 0.0
+        elif isinstance(data, np.ndarray):
+            prediction = self.model_loader.models.trade_with_ppo(data)
+            return prediction if prediction is not None else 0.0
+        return 0.0
+
+
+class VisualAIAdapter:
+    def __init__(self):
+        self.model_loader = ModelLoader(use_cache=True)
+    
+    def predict(self, data):
+        if isinstance(data, dict) and "image" in data:
+            image = np.array(data["image"], dtype=np.float32)
+            # Try to get visual AI model, fallback to CNN if not available
+            if hasattr(self.model_loader.models, 'predict_visual'):
+                features = self.model_loader.models.predict_visual(image)
+                if features is not None:
+                    # Simple heuristic: use mean of features as prediction
+                    prediction = float(np.mean(features))
+                    return float(np.tanh(prediction))
+            # Fallback to CNN prediction
+            prediction = self.model_loader.models.predict_cnn(image)
+            return prediction if prediction is not None else 0.0
+        elif isinstance(data, np.ndarray):
+            # Try to get visual AI model, fallback to CNN if not available
+            if hasattr(self.model_loader.models, 'predict_visual'):
+                features = self.model_loader.models.predict_visual(data)
+                if features is not None:
+                    # Simple heuristic: use mean of features as prediction
+                    prediction = float(np.mean(features))
+                    return float(np.tanh(prediction))
+            # Fallback to CNN prediction
+            prediction = self.model_loader.models.predict_cnn(data)
+            return prediction if prediction is not None else 0.0
+        return 0.0
+
+
+class LLMMacroAdapter:
+    def __init__(self):
+        self.model_loader = ModelLoader(use_cache=True)
+    
+    def predict(self, data):
+        if isinstance(data, dict) and "prompt" in data:
+            prompt = data["prompt"]
+            # Try to get LLM model
+            if hasattr(self.model_loader.models, 'query_llm'):
+                response = self.model_loader.models.query_llm(prompt)
+                if response is not None:
+                    # Simple sentiment analysis from LLM response
+                    # This is a basic implementation - in practice, you would parse the response
+                    # and extract sentiment scores
+                    response_lower = response.lower()
+                    if "bullish" in response_lower or "buy" in response_lower:
+                        return 1.0
+                    elif "bearish" in response_lower or "sell" in response_lower:
+                        return -1.0
+                    else:
+                        return 0.0
+            return 0.0
         return 0.0
 
 
@@ -294,6 +392,20 @@ class ModelFactory:
                 "memory_kb": 512,
                 "description": "LightGBM for fast tabular inference",
             },
+            # Visual AI models
+            "VisualAI": {
+                "class": VisualAIAdapter,
+                "type": "pattern",
+                "memory_kb": 2048,
+                "description": "Visual AI for advanced chart pattern recognition",
+            },
+            # LLM Macro models
+            "LLMMacro": {
+                "class": LLMMacroAdapter,
+                "type": "probabilistic",
+                "memory_kb": 4096,
+                "description": "LLM for macroeconomic sentiment analysis",
+            },
             # Extended models (T470 optimized)
             "MiniTransformer": {
                 "class": MiniTransformer,
@@ -441,6 +553,8 @@ class ModelFactory:
             "LSTM": 0.8,
             "MiniTransformer": 0.85,
             "CNN": 0.75,
+            "VisualAI": 0.8,
+            "LLMMacro": 0.7,
             "TinyAutoencoder": 0.7,
             "PPO": 0.7,
             "BayesianLite": 0.8,

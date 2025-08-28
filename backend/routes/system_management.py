@@ -4,6 +4,7 @@ from typing import Dict, Any, Optional
 import asyncio
 import logging
 import time
+import psutil
 from backend.core.auth import require_admin, User
 from backend.services.ws_broadcaster import broadcaster
 

@@ -111,3 +111,7 @@ class DataSourceManager:
 
 # Global instance
 data_source_manager = DataSourceManager()
+
+def get_data_source_manager() -> DataSourceManager:
+    """Get the global data source manager instance"""
+    return data_source_manager

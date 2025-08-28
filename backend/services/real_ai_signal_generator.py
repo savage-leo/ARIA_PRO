@@ -237,19 +237,22 @@ class RealAISignalGenerator:
 
     @track_performance("RealAISignalGenerator._run_generator")
     async def _run_generator(self):
-        """Main generator loop"""
+        """Main generator loop with dynamic sleep to prevent CPU saturation."""
+        analysis_cycle_time = 30  # seconds
         while self.running:
+            cycle_start_time = time.time()
             try:
                 # Analyze each symbol
-                for symbol in self.symbols:
-                    await self._analyze_symbol(symbol)
-
-                # Wait before next analysis cycle
-                await asyncio.sleep(30)  # Analyze every 30 seconds
+                await asyncio.gather(*[self._analyze_symbol(s) for s in self.symbols])
 
             except Exception as e:
                 logger.error(f"Error in real AI signal generator loop: {e}")
-                await asyncio.sleep(60)
+            finally:
+                # Calculate dynamic sleep time
+                cycle_duration = time.time() - cycle_start_time
+                sleep_time = max(0, analysis_cycle_time - cycle_duration)
+                logger.info(f"Signal generation cycle finished in {cycle_duration:.2f}s. Sleeping for {sleep_time:.2f}s.")
+                await asyncio.sleep(sleep_time)
 
     @track_performance("RealAISignalGenerator._analyze_symbol")
     async def _analyze_symbol(self, symbol: str):
@@ -606,11 +609,8 @@ class RealAISignalGenerator:
         ]
         return np.mean(recent_changes) if recent_changes else 0.0
 
-    @track_performance("RealAISignalGenerator._build_market_features")
-    async def _build_market_features(
-        self, symbol: str, bars: List[Dict]
-    ) -> Dict[str, float]:
-        """Build enhanced market features for secret ingredient fusion"""
+    def _build_market_features_sync(self, symbol: str, bars: List[Dict]) -> Dict[str, float]:
+        """Synchronous version of feature building for execution in a thread."""
         if len(bars) < 20:
             return {}
 
@@ -638,8 +638,14 @@ class RealAISignalGenerator:
             "volume_profile": self._calculate_volume_profile(bars),
             "market_structure": self._calculate_market_structure(bars),
         }
-
         return market_feats
+
+    @track_performance("RealAISignalGenerator._build_market_features")
+    async def _build_market_features(
+        self, symbol: str, bars: List[Dict]
+    ) -> Dict[str, float]:
+        """Build enhanced market features by running sync logic in a thread."""
+        return await asyncio.to_thread(self._build_market_features_sync, symbol, bars)
 
     def _calculate_spread(self, symbol: str) -> float:
         """Calculate realistic spread based on symbol"""

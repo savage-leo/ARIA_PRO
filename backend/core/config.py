@@ -13,17 +13,17 @@ logger = logging.getLogger(__name__)
 
 # Try Pydantic v2 (pydantic-settings) first, then fallback to v1 BaseSettings
 try:
-    from pydantic import BaseSettings as _BaseSettings, Field, validator  # type: ignore
+    from pydantic import BaseSettings as _BaseSettings, Field, field_validator  # type: ignore
     _V2 = False
 except Exception:
     try:
         from pydantic_settings import BaseSettings as _BaseSettings  # type: ignore
-        from pydantic import Field, validator  # type: ignore
+        from pydantic import Field, field_validator  # type: ignore
         _V2 = True
     except Exception:
         _BaseSettings = None  # type: ignore
         Field = None  # type: ignore
-        validator = None  # type: ignore
+        field_validator = None  # type: ignore
         _V2 = False
 
 
@@ -59,14 +59,40 @@ def _bootstrap_env_from_files_once() -> None:
     try:
         base_dir = os.path.dirname(os.path.dirname(__file__))  # .../backend
         project_dir = os.path.dirname(base_dir)  # .../ARIA_PRO
-        for candidate in (
-            os.path.join(project_dir, "production.env"),
-            os.path.join(project_dir, ".env"),
-        ):
+        # Determine environment before loading files so we can pick the right source
+        pre_env = (os.environ.get("ARIA_ENV", "") or "").strip().lower()
+        dev_like = pre_env in ("dev", "development", "local", "test", "testing", "ci")
+        if dev_like:
+            candidates = [os.path.join(project_dir, ".env")]
+        else:
+            # In production, prefer production.env and then .env to fill missing values
+            candidates = [
+                os.path.join(project_dir, "production.env"),
+                os.path.join(project_dir, ".env"),
+            ]
+        for candidate in candidates:
             if os.path.exists(candidate):
-                _load_env_file(candidate)
-                break
+                loaded = _load_env_file(candidate)
+                try:
+                    logger.debug(f"Loaded {loaded} env vars from {os.path.basename(candidate)}")
+                except Exception:
+                    pass
     except Exception:
+        pass
+    # Backward-compatibility: map legacy monitoring env names to PROMETHEUS_*
+    # This lets existing setups with ENABLE_METRICS/METRICS_PORT work seamlessly.
+    try:
+        if "PROMETHEUS_PORT" not in os.environ and os.environ.get("METRICS_PORT"):
+            os.environ["PROMETHEUS_PORT"] = os.environ["METRICS_PORT"]
+        if "PROMETHEUS_ENABLED" not in os.environ and os.environ.get("ENABLE_METRICS"):
+            os.environ["PROMETHEUS_ENABLED"] = os.environ["ENABLE_METRICS"]
+        if (
+            "PROMETHEUS_PUSH_GATEWAY" not in os.environ
+            and os.environ.get("PUSH_GATEWAY_URL")
+        ):
+            os.environ["PROMETHEUS_PUSH_GATEWAY"] = os.environ["PUSH_GATEWAY_URL"]
+    except Exception:
+        # Never fail bootstrap due to env mapping
         pass
     _ENV_BOOTSTRAPPED = True
 
@@ -88,6 +114,7 @@ if _BaseSettings is not None:
         ARIA_LOG_DIR: str = Field(default="./logs", env="ARIA_LOG_DIR")
 
         # Core security and CORS
+        ARIA_ENV: str = Field(default="production", env="ARIA_ENV")
         ARIA_CORS_ORIGINS: str = Field(default="", env="ARIA_CORS_ORIGINS")
         ARIA_ALLOWED_HOSTS: str = Field(default="", env="ARIA_ALLOWED_HOSTS")
         ARIA_CSP_CONNECT_SRC: str = Field(default="", env="ARIA_CSP_CONNECT_SRC")
@@ -148,6 +175,13 @@ if _BaseSettings is not None:
         RATE_LIMIT_ADMIN_PER_MINUTE: int = Field(default=60, env="RATE_LIMIT_ADMIN_PER_MINUTE")
         RATE_LIMIT_TRADING_PER_MINUTE: int = Field(default=30, env="RATE_LIMIT_TRADING_PER_MINUTE")
         
+        # Prometheus / Monitoring
+        PROMETHEUS_ENABLED: bool = Field(default=True, env="PROMETHEUS_ENABLED")
+        PROMETHEUS_PORT: int = Field(default=8001, env="PROMETHEUS_PORT")
+        PROMETHEUS_PUSH_GATEWAY: Optional[str] = Field(default=None, env="PROMETHEUS_PUSH_GATEWAY")
+        PROMETHEUS_JOB_NAME: str = Field(default="aria_pro", env="PROMETHEUS_JOB_NAME")
+        PROMETHEUS_INSTANCE: str = Field(default="aria_backend", env="PROMETHEUS_INSTANCE")
+        
         # Auto-trade thresholds
         AUTO_TRADE_PROB_THRESHOLD: float = Field(default=0.75, env="AUTO_TRADE_PROB_THRESHOLD")
         AUTO_TRADE_STOP_LOSS_ATR: float = Field(default=1.5, env="AUTO_TRADE_STOP_LOSS_ATR")
@@ -155,74 +189,89 @@ if _BaseSettings is not None:
         AUTO_TRADE_MAX_RISK_PERCENT: float = Field(default=0.5, env="AUTO_TRADE_MAX_RISK_PERCENT")
         
         # Validators for production safety
-        @validator('AUTO_TRADE_PROB_THRESHOLD')
+        @field_validator('AUTO_TRADE_PROB_THRESHOLD')
+        @classmethod
         def validate_prob_threshold(cls, v):
             if not 0 <= v <= 1:
                 raise ValueError('AUTO_TRADE_PROB_THRESHOLD must be between 0 and 1')
             return v
         
-        @validator('AUTO_TRADE_STOP_LOSS_ATR', 'AUTO_TRADE_TAKE_PROFIT_ATR')
+        @field_validator('AUTO_TRADE_STOP_LOSS_ATR', 'AUTO_TRADE_TAKE_PROFIT_ATR')
+        @classmethod
         def validate_atr_multipliers(cls, v):
             if not 0.1 <= v <= 10:
                 raise ValueError('ATR multipliers must be between 0.1 and 10')
             return v
         
-        @validator('AUTO_TRADE_MAX_RISK_PERCENT')
+        @field_validator('AUTO_TRADE_MAX_RISK_PERCENT')
+        @classmethod
         def validate_max_risk(cls, v):
             if not 0.01 <= v <= 5:
                 raise ValueError('MAX_RISK_PERCENT must be between 0.01 and 5')
             return v
         
-        @validator('LLM_TUNING_MAX_REL_DELTA')
+        @field_validator('LLM_TUNING_MAX_REL_DELTA')
+        @classmethod
         def validate_tuning_delta(cls, v):
             if not 0 <= v <= 1:
                 raise ValueError('LLM_TUNING_MAX_REL_DELTA must be between 0 and 1')
             return v
         
-        @validator('RATE_LIMIT_REQUESTS_PER_MINUTE')
+        @field_validator('RATE_LIMIT_REQUESTS_PER_MINUTE')
+        @classmethod
         def validate_rate_limit(cls, v):
             if not 1 <= v <= 10000:
                 raise ValueError('RATE_LIMIT_REQUESTS_PER_MINUTE must be between 1 and 10000')
             return v
         
-        @validator('JWT_ACCESS_TOKEN_EXPIRE_MINUTES')
+        @field_validator('JWT_ACCESS_TOKEN_EXPIRE_MINUTES')
+        @classmethod
         def validate_jwt_expiry(cls, v):
             if not 1 <= v <= 1440:  # Max 24 hours
                 raise ValueError('JWT_ACCESS_TOKEN_EXPIRE_MINUTES must be between 1 and 1440')
             return v
         
-        @validator('JWT_SECRET_KEY')
+        @field_validator('JWT_SECRET_KEY')
+        @classmethod
         def validate_jwt_secret(cls, v):
             if not v or len(v) < 32:
                 raise ValueError('JWT_SECRET_KEY must be at least 32 characters for production security')
             return v
         
-        @validator('ADMIN_API_KEY')
+        @field_validator('ADMIN_API_KEY')
+        @classmethod
         def validate_admin_key(cls, v):
             if not v or len(v) < 16:
                 raise ValueError('ADMIN_API_KEY must be at least 16 characters for production security')
             return v
         
-        @validator('ARIA_WS_TOKEN')
+        @field_validator('ARIA_WS_TOKEN')
+        @classmethod
         def validate_ws_token(cls, v):
             if not v or len(v) < 16:
                 raise ValueError('ARIA_WS_TOKEN must be at least 16 characters for production security')
             return v
         
-        @validator('MT5_LOGIN')
-        def validate_mt5_login(cls, v, values):
+        @field_validator('MT5_LOGIN')
+        @classmethod
+        def validate_mt5_login(cls, v, info):
+            values = info.data if hasattr(info, 'data') else {}
             if values.get('ARIA_ENABLE_MT5') and not v:
                 raise ValueError('MT5_LOGIN is required when ARIA_ENABLE_MT5=1')
             return v
         
-        @validator('MT5_PASSWORD')
-        def validate_mt5_password(cls, v, values):
+        @field_validator('MT5_PASSWORD')
+        @classmethod
+        def validate_mt5_password(cls, v, info):
+            values = info.data if hasattr(info, 'data') else {}
             if values.get('ARIA_ENABLE_MT5') and not v:
                 raise ValueError('MT5_PASSWORD is required when ARIA_ENABLE_MT5=1')
             return v
         
-        @validator('MT5_SERVER')
-        def validate_mt5_server(cls, v, values):
+        @field_validator('MT5_SERVER')
+        @classmethod
+        def validate_mt5_server(cls, v, info):
+            values = info.data if hasattr(info, 'data') else {}
             if values.get('ARIA_ENABLE_MT5') and not v:
                 raise ValueError('MT5_SERVER is required when ARIA_ENABLE_MT5=1')
             return v
@@ -277,6 +326,27 @@ if _BaseSettings is not None:
         @property
         def include_xgb(self) -> bool:
             return bool(self.ARIA_INCLUDE_XGB)
+
+        # Environment helpers (fallback)
+        @property
+        def environment(self) -> str:
+            try:
+                env = (self.ARIA_ENV or "production").strip().lower()
+            except Exception:
+                env = "production"
+            return env
+
+        @property
+        def is_development(self) -> bool:
+            return self.environment in ("dev", "development", "local")
+
+        @property
+        def is_test(self) -> bool:
+            return self.environment in ("test", "testing", "ci")
+
+        @property
+        def is_production(self) -> bool:
+            return not (self.is_development or self.is_test)
         
         @property
         def jwt_access_expire(self) -> timedelta:
@@ -285,6 +355,27 @@ if _BaseSettings is not None:
         @property
         def jwt_refresh_expire(self) -> timedelta:
             return timedelta(days=self.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
+
+        # Environment helpers
+        @property
+        def environment(self) -> str:
+            try:
+                env = (self.ARIA_ENV or "production").strip().lower()
+            except Exception:
+                env = "production"
+            return env
+
+        @property
+        def is_development(self) -> bool:
+            return self.environment in ("dev", "development", "local")
+
+        @property
+        def is_test(self) -> bool:
+            return self.environment in ("test", "testing", "ci")
+
+        @property
+        def is_production(self) -> bool:
+            return not (self.is_development or self.is_test)
 
 else:
 
@@ -295,6 +386,7 @@ else:
             self.ARIA_LOG_DIR = os.environ.get("ARIA_LOG_DIR", "./logs")
 
             # Security/CORS
+            self.ARIA_ENV = os.environ.get("ARIA_ENV", "production")
             self.ARIA_CORS_ORIGINS = os.environ.get("ARIA_CORS_ORIGINS", "")
             self.ARIA_ALLOWED_HOSTS = os.environ.get("ARIA_ALLOWED_HOSTS", "")
             self.ARIA_CSP_CONNECT_SRC = os.environ.get("ARIA_CSP_CONNECT_SRC", "")
@@ -380,6 +472,16 @@ else:
                 self.RATE_LIMIT_BURST = int(os.environ.get("RATE_LIMIT_BURST", "50"))
             except Exception:
                 self.RATE_LIMIT_BURST = 50
+
+            # Prometheus / Monitoring
+            self.PROMETHEUS_ENABLED = os.environ.get("PROMETHEUS_ENABLED", "1") in ("1", "true", "True")
+            try:
+                self.PROMETHEUS_PORT = int(os.environ.get("PROMETHEUS_PORT", "8001"))
+            except Exception:
+                self.PROMETHEUS_PORT = 8001
+            self.PROMETHEUS_PUSH_GATEWAY = os.environ.get("PROMETHEUS_PUSH_GATEWAY")
+            self.PROMETHEUS_JOB_NAME = os.environ.get("PROMETHEUS_JOB_NAME", "aria_pro")
+            self.PROMETHEUS_INSTANCE = os.environ.get("PROMETHEUS_INSTANCE", "aria_backend")
 
         @property
         def mt5_enabled(self) -> bool:

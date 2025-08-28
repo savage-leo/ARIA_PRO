@@ -222,9 +222,15 @@ class PrometheusMetrics:
         )
         
         # Set application info
+        try:
+            from backend.core.config import get_settings  # local import to avoid cycles
+            _settings = get_settings()
+            env_name = getattr(_settings, 'environment', 'production')
+        except Exception:
+            env_name = 'production'
         self.app_info.info({
             'version': '1.2.0',
-            'environment': 'production',
+            'environment': env_name,
             'instance': self.config.instance_name
         })
         
@@ -234,7 +240,17 @@ class PrometheusMetrics:
         """Start Prometheus metrics HTTP server"""
         if not PROMETHEUS_AVAILABLE or not self.config.enabled:
             return False
-        
+        # In dev/test, do not start a separate HTTP server; expose via FastAPI endpoint only
+        try:
+            from backend.core.config import get_settings  # local import to avoid cycles
+            _settings = get_settings()
+            if getattr(_settings, 'is_development', False) or getattr(_settings, 'is_test', False):
+                logger.info("Dev/Test mode: skipping standalone Prometheus HTTP server; metrics available via API endpoint")
+                return False
+        except Exception:
+            # If settings load fails, fall through and attempt to start server (safe default)
+            pass
+
         with self._lock:
             if self.metrics_server_started:
                 return True

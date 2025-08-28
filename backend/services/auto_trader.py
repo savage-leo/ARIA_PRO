@@ -88,6 +88,7 @@ class AutoTrader:
             os.environ.get("AUTO_TRADE_POS_LIMITS", "")
         )
         self.default_max_positions_per_symbol: int = int(os.environ.get("AUTO_TRADE_MAX_POS_SYMBOL", "1"))
+        self.max_positions_per_symbol: int = int(os.environ.get("AUTO_TRADE_MAX_POSITIONS_PER_SYMBOL", "10"))
         self.max_total_positions: int = int(os.environ.get("AUTO_TRADE_MAX_TOTAL_POS", "5"))
         self.active_positions: Dict[str, int] = {}
         
@@ -141,6 +142,8 @@ class AutoTrader:
         self.llm_gatekeeper = get_llm_gatekeeper()
         self.cross_agent_pipeline = get_cross_agent_reasoning()
         self.performance_monitor = get_performance_monitor()
+
+        self.MAX_TICK_PROCESSING_TIME = 30.0  # seconds
 
     @staticmethod
     def _parse_symbols(text: str) -> List[str]:
@@ -304,12 +307,16 @@ class AutoTrader:
                     logger.debug(f"Max positions for {symbol} reached")
                     continue
                     
+                start = time.monotonic()
                 await asyncio.wait_for(
                     self._process_symbol(symbol),
-                    timeout=self.signal_timeout_sec
+                    timeout=self.MAX_TICK_PROCESSING_TIME
                 )
+                elapsed = time.monotonic() - start
+                logger.info(f"Processed {symbol} in {elapsed:.2f}s")
             except asyncio.TimeoutError:
-                logger.error(f"Processing timeout for {symbol} after {self.signal_timeout_sec}s")
+                elapsed = time.monotonic() - start
+                logger.warning(f"Processing timeout for {symbol} after {elapsed:.2f}s (limit {self.MAX_TICK_PROCESSING_TIME}s)")
                 self.failed_today += 1
             except Exception:
                 logger.exception(f"AutoTrader symbol loop error for {symbol}")

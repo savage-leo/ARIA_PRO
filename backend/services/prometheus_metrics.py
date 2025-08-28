@@ -161,6 +161,19 @@ class PrometheusMetrics:
         """Get content type for metrics"""
         return CONTENT_TYPE_LATEST
 
-
-# Global Prometheus metrics instance
-prometheus_metrics = PrometheusMetrics(port=8000)
+# Global Prometheus metrics instance (legacy module)
+try:
+    # Respect unified settings and avoid auto-start in dev/test
+    from backend.core.config import get_settings
+    _settings = get_settings()
+    _enabled = getattr(_settings, "PROMETHEUS_ENABLED", True)
+    _is_dev = getattr(_settings, "is_development", False) or getattr(_settings, "is_test", False)
+    _port = getattr(_settings, "PROMETHEUS_PORT", 8001)
+    if _enabled and not _is_dev:
+        prometheus_metrics = PrometheusMetrics(port=_port)
+    else:
+        prometheus_metrics = None
+        logger.info("Legacy Prometheus server not started (disabled or dev/test mode).")
+except Exception as e:
+    prometheus_metrics = None
+    logger.warning(f"Legacy Prometheus metrics initialization skipped: {e}")

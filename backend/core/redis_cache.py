@@ -92,41 +92,50 @@ class RedisCache:
         logger.info(f"RedisCache initialized: {self.config.host}:{self.config.port}")
     
     async def connect(self) -> bool:
-        """Establish Redis connection"""
+        """Establish Redis connection with retry logic"""
         if not REDIS_AVAILABLE:
             logger.warning("Redis not available - caching disabled")
             return False
-        
-        try:
-            async with self._lock:
-                if self.connected:
+
+        max_retries = 5
+        backoff = 2
+        attempts = 0
+        last_exc = None
+        while attempts < max_retries:
+            try:
+                async with self._lock:
+                    if self.connected:
+                        return True
+
+                    self.pool = redis.ConnectionPool(
+                        host=self.config.host,
+                        port=self.config.port,
+                        db=self.config.db,
+                        password=self.config.password,
+                        max_connections=self.config.max_connections,
+                        socket_timeout=self.config.socket_timeout,
+                        socket_connect_timeout=self.config.socket_connect_timeout,
+                        retry_on_timeout=self.config.retry_on_timeout,
+                        decode_responses=self.config.decode_responses
+                    )
+
+                    # Test connection
+                    client = redis.Redis(connection_pool=self.pool)
+                    await client.ping()
+                    await client.close()
+
+                    self.connected = True
+                    logger.info("Redis connection established successfully")
                     return True
-                
-                self.pool = redis.ConnectionPool(
-                    host=self.config.host,
-                    port=self.config.port,
-                    db=self.config.db,
-                    password=self.config.password,
-                    max_connections=self.config.max_connections,
-                    socket_timeout=self.config.socket_timeout,
-                    socket_connect_timeout=self.config.socket_connect_timeout,
-                    retry_on_timeout=self.config.retry_on_timeout,
-                    decode_responses=self.config.decode_responses
-                )
-                
-                # Test connection
-                client = redis.Redis(connection_pool=self.pool)
-                await client.ping()
-                await client.close()
-                
-                self.connected = True
-                logger.info("Redis connection established successfully")
-                return True
-                
-        except Exception as e:
-            logger.error(f"Redis connection failed: {e}")
-            self.connected = False
-            return False
+            except Exception as e:
+                attempts += 1
+                wait = backoff ** attempts
+                logger.warning(f"Redis connection failed (attempt {attempts}/{max_retries}). Retrying in {wait}s… {e}")
+                last_exc = e
+                await asyncio.sleep(wait)
+        logger.error(f"Unable to connect to Redis after {max_retries} attempts: {last_exc}")
+        self.connected = False
+        raise RuntimeError("Unable to connect to Redis after multiple attempts")
     
     async def disconnect(self):
         """Close Redis connection"""
