@@ -13,7 +13,21 @@ services:
     restart: unless-stopped
     networks:
       - aria-network
+  redis:
+    image: redis:7-alpine
+    container_name: aria_redis
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    restart: always
+    networks:
+      - aria-network
 
 networks:
   aria-network:
     driver: bridge
+
+volumes:
+  redis_data:

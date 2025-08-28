@@ -1,7 +1,7 @@
 param(
   [ValidateSet('dev','prod')][string]$Mode = 'dev',
   [string]$BindHost = '127.0.0.1',
-  [int]$BackendPort = 8000,
+  [int]$BackendPort = 8100,
   [int]$FrontendPort = 5175,
   [string]$PythonPath = '.venv\Scripts\python.exe',
   [switch]$OpenBrowser,
@@ -32,6 +32,37 @@ if (-not $env:ARIA_ALLOWED_ORIGINS) {
   $env:ARIA_ALLOWED_ORIGINS = "$($env:ARIA_CORS_ORIGINS),http://localhost:5176,http://127.0.0.1:5176"
 }
 
+# Development mode: explicitly set safe environment flags and secrets
+if ($Mode -eq 'dev') {
+  # Environment selection
+  $env:ARIA_ENV = 'development'
+
+  # Disable live trading/execution in dev for safety
+  $env:ARIA_ENABLE_MT5 = '0'
+  $env:ARIA_ENABLE_EXEC = '0'
+  $env:AUTO_EXEC_ENABLED = '0'
+  $env:ALLOW_LIVE = '0'
+
+  # Seed strong dummy secrets if not already provided by user env
+  if (-not $env:JWT_SECRET_KEY -or $env:JWT_SECRET_KEY.Trim() -eq '') {
+    $env:JWT_SECRET_KEY = 'dev_jwt_0123456789abcdef0123456789abcdef01234567'
+  }
+  if (-not $env:ADMIN_API_KEY -or $env:ADMIN_API_KEY.Trim() -eq '') {
+    $env:ADMIN_API_KEY = 'dev_admin_0123456789abcd'
+  }
+  if (-not $env:ARIA_WS_TOKEN -or $env:ARIA_WS_TOKEN.Trim() -eq '') {
+    $env:ARIA_WS_TOKEN = 'dev_ws_0123456789abcd'
+  }
+
+  # Verbose logging in development unless overridden
+  if (-not $env:LOG_LEVEL -or $env:LOG_LEVEL.Trim() -eq '') { $env:LOG_LEVEL = 'DEBUG' }
+
+  # Ensure permissive dev hosts if none provided
+  if (-not $env:ARIA_ALLOWED_HOSTS -or $env:ARIA_ALLOWED_HOSTS.Trim() -eq '') {
+    $env:ARIA_ALLOWED_HOSTS = 'localhost,127.0.0.1'
+  }
+}
+
 if (-not $SkipInstall) {
   # Backend deps
   Write-Info 'Installing backend dependencies...'
@@ -51,7 +82,7 @@ if (-not $SkipInstall) {
 # Backend — start if not healthy
 $base = "http://$BindHost`:$BackendPort"
 function Test-Health { try { Invoke-RestMethod -Uri "$base/health" -Method Get -TimeoutSec 2 } catch { $null } }
-function Wait-Health([int]$TimeoutSec){ $deadline=(Get-Date).AddSeconds($TimeoutSec); while((Get-Date) -lt $deadline){ $h=Test-Health; if($h -and $h.status -eq 'ok'){ return $h }; Start-Sleep -Milliseconds 500 }; throw "Health timeout" }
+function Wait-Health([int]$TimeoutSec){ $deadline=(Get-Date).AddSeconds($TimeoutSec); while((Get-Date) -lt $deadline){ $h=Test-Health; if($h -and ($h.status -eq 'healthy' -or $h.status -eq 'degraded')){ return $h }; Start-Sleep -Milliseconds 500 }; throw "Health timeout" }
 
 $h = Test-Health
 $backendStarted = $false
